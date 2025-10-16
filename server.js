@@ -14,7 +14,7 @@ const FactureFournisseurRoutes = require("./routes/FactureFournisseurRoutes");
 const FactureClientRoutes = require("./routes/FactureClientRoutes");
 
 const PaymentFournisseurRoutes = require("./routes/PaymentFournisseurRoutes");
-const EncaissementClientRoutes = require("./routes/EncaissementClientRoutes");
+const encaissementClientRoutes = require("./routes/encaissementClientRoutes");
 
 const vendeurRoutes = require("./routes/vendeurRoutes");
 const BonLivraisonRoutes = require("./routes/BonLivraisonRoutes");
@@ -48,7 +48,7 @@ app.use("/api/VenteComptoire", VenteComptoireRoutes);
 app.use("/api/FacturesFournisseur", FactureFournisseurRoutes);
 app.use("/api/factures-client", FactureClientRoutes);
 app.use("/api/PaymentFournisseur", PaymentFournisseurRoutes);
-app.use("/api/EncaissementClient", EncaissementClientRoutes);
+app.use("/api/EncaissementClient", encaissementClientRoutes);
 app.use("/api/Auth", AuthRoutes);
 app.use("/api/getpayment", TresorieRoutes);
 
