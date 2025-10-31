@@ -84,10 +84,9 @@ exports.createFactureClient = async (req, res) => {
     if (
       !numeroFacture ||
       !dateFacture ||
-      !client_id ||
+      !client_id 
       // !modeReglement ||
-      !dateEcheance ||
-      !conditions
+     
     ) {
       return res
         .status(400)

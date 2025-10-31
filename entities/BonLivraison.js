@@ -9,8 +9,8 @@ const BonLivraison = new EntitySchema({
         dateLivraison: { type: "timestamp" },
         status: {
             type: "enum",
-            enum: ["Brouillon",  "Livr�", "Partiellement Livr�", "Annule"],
-            default: "Livr�"
+            enum: ["Brouillon", "Livré", "Partiellement Livré", "Annule"], // ✅ MODIFIEZ LES STATUTS
+            default: "Livré"
         },
         remise: { type: "decimal", precision: 10, scale: 2, default: 0 },
         remiseType: {

@@ -215,7 +215,6 @@ exports.updateArticle = async (req, res) => {
 
       // Store old image path for deletion if new image is uploaded
       const oldImagePath = article.image;
-
       if (fournisseur_id) {
         const fournisseur = await fournisseurRepository.findOneBy({ id: parseInt(fournisseur_id) });
         if (!fournisseur) {
