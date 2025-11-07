@@ -5,15 +5,21 @@ const EncaissementClient = new EntitySchema({
   tableName: "encaissements_client",
   columns: {
     id: { primary: true, type: "int", generated: true },
-    montant: { type: "decimal", precision: 12, scale: 2 },
+    montant: { type: "decimal", precision: 12, scale: 3 }, // Changed to 3 decimals
     modePaiement: {
       type: "enum",
       enum: ["Espece", "Cheque", "Virement", "Traite", "Autre"],
     },
     numeroEncaissement: { type: "varchar", length: 100, nullable: true },
     date: { type: "date" },
-    client_id: { type: "int", nullable: true }, // Required
-    facture_id: { type: "int", nullable: true }, // Optional
+    client_id: { type: "int", nullable: true },
+    facture_id: { type: "int", nullable: true },
+    // Add new fields for cheque
+    numeroCheque: { type: "varchar", length: 100, nullable: true },
+    banque: { type: "varchar", length: 100, nullable: true },
+    // Add new fields for traite
+    numeroTraite: { type: "varchar", length: 100, nullable: true },
+    dateEcheance: { type: "date", nullable: true },
     createdAt: { type: "timestamp", createDate: true },
     updatedAt: { type: "timestamp", updateDate: true },
   },

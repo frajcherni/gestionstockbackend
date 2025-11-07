@@ -12,6 +12,10 @@ exports.createEncaissement = async (req, res) => {
       date,
       client_id,
       facture_id,
+      numeroCheque,
+      banque,
+      numeroTraite,
+      dateEcheance,
     } = req.body;
 
     console.log("REQ BODY:", req.body);
@@ -33,6 +37,25 @@ exports.createEncaissement = async (req, res) => {
     const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
+    }
+
+    // Validate required fields based on payment mode
+    if (modePaiement === "Cheque") {
+      if (!numeroCheque) {
+        return res.status(400).json({ error: "Le numéro du chèque est requis" });
+      }
+      if (!banque) {
+        return res.status(400).json({ error: "La banque est requise" });
+      }
+    }
+
+    if (modePaiement === "Traite") {
+      if (!numeroTraite) {
+        return res.status(400).json({ error: "Le numéro de traite est requis" });
+      }
+      if (!dateEcheance) {
+        return res.status(400).json({ error: "La date d'échéance est requise" });
+      }
     }
 
     // Validate client_id if provided
@@ -63,6 +86,10 @@ exports.createEncaissement = async (req, res) => {
       date,
       client_id,
       facture_id,
+      numeroCheque,
+      banque,
+      numeroTraite,
+      dateEcheance,
     });
 
     const savedEncaissement = await encaissementRepo.save(newEncaissement);
@@ -71,10 +98,10 @@ exports.createEncaissement = async (req, res) => {
     if (facture) {
       facture.montantPaye = (
         Number(facture.montantPaye || 0) + Number(montant)
-      ).toFixed(2);
+      ).toFixed(3); // Changed to 3 decimals
       facture.resteAPayer = (
         Number(facture.totalTTC) - Number(facture.montantPaye)
-      ).toFixed(2);
+      ).toFixed(3); // Changed to 3 decimals
       facture.status = Number(facture.resteAPayer) <= 0 ? "Payee" : "Validee";
       await AppDataSource.getRepository(FactureClient).save(facture);
     }
@@ -146,10 +173,10 @@ exports.deleteEncaissement = async (req, res) => {
       if (facture) {
         facture.montantPaye = (
           Number(facture.montantPaye || 0) - Number(encaissement.montant)
-        ).toFixed(2);
+        ).toFixed(3); // Changed to 3 decimals
         facture.resteAPayer = (
           Number(facture.totalTTC) - Number(facture.montantPaye)
-        ).toFixed(2);
+        ).toFixed(3); // Changed to 3 decimals
         facture.status = Number(facture.resteAPayer) <= 0 ? "Payee" : "Validee";
         await factureRepo.save(facture);
       }
@@ -174,6 +201,10 @@ exports.updateEncaissement = async (req, res) => {
       date,
       client_id,
       facture_id,
+      numeroCheque,
+      banque,
+      numeroTraite,
+      dateEcheance,
     } = req.body;
 
     console.log("UPDATE REQ BODY:", req.body);
@@ -195,6 +226,25 @@ exports.updateEncaissement = async (req, res) => {
     const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
+    }
+
+    // Validate required fields based on payment mode
+    if (modePaiement === "Cheque") {
+      if (!numeroCheque) {
+        return res.status(400).json({ error: "Le numéro du chèque est requis" });
+      }
+      if (!banque) {
+        return res.status(400).json({ error: "La banque est requise" });
+      }
+    }
+
+    if (modePaiement === "Traite") {
+      if (!numeroTraite) {
+        return res.status(400).json({ error: "Le numéro de traite est requis" });
+      }
+      if (!dateEcheance) {
+        return res.status(400).json({ error: "La date d'échéance est requise" });
+      }
     }
 
     const encaissementRepo = AppDataSource.getRepository(EncaissementClient);
@@ -228,12 +278,12 @@ exports.updateEncaissement = async (req, res) => {
         // Validate that new payment amount doesn't exceed total
         if (newMontantPaye > Number(facture.totalTTC)) {
           return res.status(400).json({ 
-            error: `Le montant total payé (${newMontantPaye.toFixed(2)} DT) ne peut pas dépasser le total de la facture (${Number(facture.totalTTC).toFixed(2)} DT)` 
+            error: `Le montant total payé (${newMontantPaye.toFixed(3)} DT) ne peut pas dépasser le total de la facture (${Number(facture.totalTTC).toFixed(3)} DT)` 
           });
         }
 
-        facture.montantPaye = newMontantPaye.toFixed(2);
-        facture.resteAPayer = newResteAPayer.toFixed(2);
+        facture.montantPaye = newMontantPaye.toFixed(3); // Changed to 3 decimals
+        facture.resteAPayer = newResteAPayer.toFixed(3); // Changed to 3 decimals
         
         // Update status based on new resteAPayer
         if (newResteAPayer <= 0) {
@@ -256,6 +306,10 @@ exports.updateEncaissement = async (req, res) => {
       date,
       client_id,
       facture_id,
+      numeroCheque,
+      banque,
+      numeroTraite,
+      dateEcheance,
     });
 
     // Fetch the updated encaissement with relations

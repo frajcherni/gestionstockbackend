@@ -17,7 +17,7 @@ exports.createBonCommande = async (req, res) => {
       taxMode,
       montant_fodec,
     } = req.body;
-console.log(numeroCommande)
+    console.log(numeroCommande);
     const fournisseurRepo = AppDataSource.getRepository(Fournisseur);
     const articleRepo = AppDataSource.getRepository(Article);
     const bonRepo = AppDataSource.getRepository(BonCommande);
@@ -68,7 +68,6 @@ console.log(numeroCommande)
           ? Boolean(item.taux_fodec)
           : article.taux_fodec;
 
-
       if (!item.quantite || !item.prix_unitaire) {
         return res.status(400).json({
           message:
@@ -113,7 +112,7 @@ console.log(numeroCommande)
     const bonCommande = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
-      status : "Confirme",
+      status: "Confirme",
       remise: finalRemise,
       remiseType,
       totalHT: subTotal.toFixed(2),
@@ -170,7 +169,9 @@ exports.updateBonCommande = async (req, res) => {
 
     // Validation
     if (!numeroCommande || !fournisseur_id || !dateCommande) {
-      return res.status(400).json({ message: "Les champs obligatoires sont manquants" });
+      return res
+        .status(400)
+        .json({ message: "Les champs obligatoires sont manquants" });
     }
 
     if (!["percentage", "fixed"].includes(remiseType)) {
@@ -179,7 +180,9 @@ exports.updateBonCommande = async (req, res) => {
       });
     }
 
-    const fournisseur = await fournisseurRepo.findOneBy({ id: parseInt(fournisseur_id) });
+    const fournisseur = await fournisseurRepo.findOneBy({
+      id: parseInt(fournisseur_id),
+    });
     if (!fournisseur) {
       return res.status(404).json({ message: "Fournisseur non trouvé" });
     }
@@ -215,20 +218,28 @@ exports.updateBonCommande = async (req, res) => {
 
     const bonCommandeArticles = [];
     for (const item of articles) {
-      const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
+      const article = await articleRepo.findOneBy({
+        id: parseInt(item.article_id),
+      });
       if (!article) {
-        return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouvé` });
+        return res
+          .status(404)
+          .json({ message: `Article avec ID ${item.article_id} non trouvé` });
       }
 
       if (!item.quantite || !item.prix_unitaire) {
-        return res.status(400).json({ message: "Quantité et prix unitaire sont obligatoires" });
+        return res
+          .status(400)
+          .json({ message: "Quantité et prix unitaire sont obligatoires" });
       }
 
       let prixUnitaire = parseFloat(item.prix_unitaire);
       const tvaRate = item.tva ? parseFloat(item.tva) : 0;
       const remiseRate = item.remise ? parseFloat(item.remise) : 0;
       const tauxFodec =
-        item.taux_fodec !== undefined ? Boolean(item.taux_fodec) : article.taux_fodec;
+        item.taux_fodec !== undefined
+          ? Boolean(item.taux_fodec)
+          : article.taux_fodec;
 
       if (taxMode === "TTC") {
         prixUnitaire = prixUnitaire / (1 + tvaRate / 100);
@@ -294,7 +305,6 @@ exports.updateBonCommande = async (req, res) => {
   }
 };
 
-
 exports.getAllBonCommande = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(BonCommande);
@@ -302,7 +312,7 @@ exports.getAllBonCommande = async (req, res) => {
       relations: ["fournisseur", "articles", "articles.article"],
     });
     res.json(list);
-    console.log(list)
+    console.log(list);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
@@ -390,7 +400,7 @@ exports.getNextCommandeNumber = async (req, res) => {
 
     const nextCommandeNumber = `${prefix}-${nextNumber
       .toString()
-      .padStart(4, "0")}/${year}`;
+      .padStart(3, "0")}/${year}`;
     res.json({ numeroCommande: nextCommandeNumber });
   } catch (err) {
     console.error(err);

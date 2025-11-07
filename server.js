@@ -24,7 +24,11 @@ const TresorieRoutes =  require("./routes/TresorieRoutes");
 const app = express();
 app.use('/uploads', express.static('uploads'));
 
-app.use(cors());
+app.use(cors({
+  origin: "*", // ou spécifie ton domaine, ex: 'http://localhost:3000'
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
 
 app.use((err, req, res, next) => {

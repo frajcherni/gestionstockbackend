@@ -12,7 +12,7 @@ const BonLivraison = new EntitySchema({
             enum: ["Brouillon", "Livré", "Partiellement Livré", "Annule"], // ✅ MODIFIEZ LES STATUTS
             default: "Livré"
         },
-        remise: { type: "decimal", precision: 10, scale: 2, default: 0 },
+        remise: { type: "decimal", precision: 10, scale: 3, default: 0 },
         remiseType: {
             type: "enum",
             enum: ["percentage", "fixed"],
@@ -62,9 +62,9 @@ const BonLivraisonArticle = new EntitySchema({
     columns: {
         id: { primary: true, type: "int", generated: true },
         quantite: { type: "int" },
-        prix_unitaire: { type: "decimal", precision: 10, scale: 2 },
-        tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
-        remise: { type: "decimal", precision: 5, scale: 2, nullable: true, default: null }
+        prix_unitaire: { type: "decimal", precision: 10, scale: 3 },
+        tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
+        remise: { type: "decimal", precision: 5, scale: 3, nullable: true, default: null }
     },
     relations: {
         bonLivraison: {

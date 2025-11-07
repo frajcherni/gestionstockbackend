@@ -58,14 +58,14 @@ const BonCommandeArticle = new EntitySchema({
     tva: {
       type: "decimal",
       precision: 5,
-      scale: 2,
+      scale: 3,
       nullable: true,
     },
-    taux_fodec: { type: "boolean" },
+    taux_fodec: { type: "boolean", nullable: true, default: false },
     remise: {
       type: "decimal",
       precision: 5,
-      scale: 2,
+      scale: 3,
       nullable: true,
       default: null,
     },

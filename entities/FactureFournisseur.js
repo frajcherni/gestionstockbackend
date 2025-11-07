@@ -12,9 +12,9 @@ const FactureFournisseur = new EntitySchema({
             enum: ["Brouillon", "Validee", "Annulee", "Payee"],
             default: "Validee"
         },
-        totalHT: { type: "decimal", precision: 12, scale: 2, default: 0 },
-        totalTVA: { type: "decimal", precision: 12, scale: 2, default: 0 },
-        totalTTC: { type: "decimal", precision: 12, scale: 2, default: 0 },
+        totalHT: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        totalTVA: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        totalTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
         notes: { type: "text", nullable: true },
         modeReglement: {
             type: "enum",
@@ -22,9 +22,9 @@ const FactureFournisseur = new EntitySchema({
             nullable: true
         },
         dateEcheance: { type: "date", nullable: true },
-        montantPaye: { type: "decimal", precision: 12, scale: 2, default: 0 },
-        resteAPayer: { type: "decimal", precision: 12, scale: 2, default: 0 },
-        remise: { type: "decimal", precision: 12, scale: 2, default: 0, nullable: true },
+        montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        resteAPayer: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        remise: { type: "decimal", precision: 12, scale: 3, default: 0, nullable: true },
         remiseType: {
             type: "enum",
             enum: ["percentage", "fixed"],
@@ -67,9 +67,9 @@ const FactureFournisseurArticle = new EntitySchema({
     columns: {
         id: { primary: true, type: "int", generated: true },
         quantite: { type: "int" },
-        prixUnitaire: { type: "decimal", precision: 12, scale: 2 },
-        tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
-        remise: { type: "decimal", precision: 5, scale: 2, nullable: true, default: null }
+        prixUnitaire: { type: "decimal", precision: 12, scale: 3 },
+        tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
+        remise: { type: "decimal", precision: 5, scale: 3, nullable: true, default: null }
     },
     relations: {
         factureFournisseur: {

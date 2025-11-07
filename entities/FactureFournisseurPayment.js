@@ -5,7 +5,7 @@ const FactureFournisseurPayment = new EntitySchema({
   tableName: "factures_fournisseur_payments",
   columns: {
     id: { primary: true, type: "int", generated: true },
-    montant: { type: "decimal", precision: 12, scale: 2 },
+    montant: { type: "decimal", precision: 12, scale: 3 },
     modePaiement: {
       type: "enum",
       enum: ["Espece", "Cheque", "Virement", "Traite", "Autre"],

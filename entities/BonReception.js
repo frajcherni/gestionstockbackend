@@ -13,7 +13,7 @@ const BonReception = new EntitySchema({
       default: "Recu",
     },
     notes: { type: "text", nullable: true },
-    remise: { type: "decimal", precision: 10, scale: 2, default: 0 },
+    remise: { type: "decimal", precision: 10, scale: 3, default: 0 },
     remiseType: {
       type: "enum",
       enum: ["percentage", "fixed"],
@@ -53,17 +53,17 @@ const BonReceptionArticle = new EntitySchema({
   columns: {
     id: { primary: true, type: "int", generated: true },
     quantite: { type: "int" },
-    prixUnitaire: { type: "decimal", precision: 10, scale: 2 },
+    prixUnitaire: { type: "decimal", precision: 10, scale: 3 },
     tva: {
       type: "decimal",
       precision: 5,
-      scale: 2,
+      scale: 3,
       nullable: true,
     },
     remise: {
       type: "decimal",
       precision: 5,
-      scale: 2,
+      scale: 3,
       nullable: true,
       default: null,
     },
