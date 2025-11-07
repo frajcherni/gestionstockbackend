@@ -25,9 +25,9 @@ const app = express();
 app.use('/uploads', express.static('uploads'));
 
 app.use(cors({
-  origin: "*", // ou spécifie ton domaine, ex: 'http://localhost:3000'
+  origin: ["http://localhost:3000", "http://54.37.159.225"], // 👈 Add your frontend URLs
   methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  credentials: true
 }));
 app.use(express.json());
 
