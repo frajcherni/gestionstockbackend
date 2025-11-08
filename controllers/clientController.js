@@ -43,11 +43,7 @@ exports.createClient = async (req, res) => {
       'email'
     ];
 
-    for (const field of requiredFields) {
-      if (!req.body[field]) {
-        return res.status(400).json({ message: `${field} is required` });
-      }
-    }
+ 
 
     const clientRepository = AppDataSource.getRepository(Client);
     const newClient = clientRepository.create(req.body);

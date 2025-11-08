@@ -6,7 +6,7 @@ exports.createVendeur = async (req, res) => {
     try {
         const { nom, prenom, telephone, email, commission } = req.body;
 
-        if (!nom || !prenom) {
+        if ( !prenom) {
             return res.status(400).json({ message: 'Nom and prenom are required' });
         }
 

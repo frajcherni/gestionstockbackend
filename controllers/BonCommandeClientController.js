@@ -478,7 +478,7 @@ exports.getNextCommandeNumber = async (req, res) => {
         const current = parseInt(match[1], 10);
         const next = current + 1;
         nextCommandeNumber = `${prefix}-${String(next).padStart(
-          4,
+          3,
           "0"
         )}/${year}`;
       } else {

@@ -383,7 +383,7 @@ exports.getNextFactureNumber = async (req, res) => {
 
     const nextFactureNumber = `${prefix}-${nextNumber
       .toString()
-      .padStart(4, "0")}/${year}`;
+      .padStart(3, "0")}/${year}`;
 
     res.json({ numeroFacture: nextFactureNumber });
   } catch (err) {

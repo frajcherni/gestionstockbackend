@@ -591,7 +591,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
 
     const nextLivraisonNumber = `${prefix}-${nextNumber
       .toString()
-      .padStart(4, "0")}/${year}`;
+      .padStart(3, "0")}/${year}`;
 
     res.json({ numeroLivraison: nextLivraisonNumber });
   } catch (err) {
