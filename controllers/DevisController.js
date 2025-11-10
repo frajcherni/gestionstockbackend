@@ -4,6 +4,123 @@ const { Client } = require("../entities/Client");
 const { Vendeur } = require("../entities/Vendeur");
 const { DevisClient, DevisClientArticle } = require("../entities/Devis");
 
+exports.updateDevisClient = async (req, res) => {
+  try {
+    const devisRepo = AppDataSource.getRepository(DevisClient);
+    const devisArticleRepo = AppDataSource.getRepository(DevisClientArticle);
+    const articleRepo = AppDataSource.getRepository(Article);
+    const clientRepo = AppDataSource.getRepository(Client);
+    const vendeurRepo = AppDataSource.getRepository(Vendeur);
+
+    // --- Load devis ---
+    const devis = await devisRepo.findOne({
+      where: { id: parseInt(req.params.id) },
+      relations: ["articles", "articles.article", "client", "vendeur"],
+    });
+
+    if (!devis) {
+      return res.status(404).json({ message: "Devis client non trouvé" });
+    }
+
+    // --- Update parent scalar fields ---
+    const updates = {};
+    if (req.body.dateCommande)
+      updates.dateCommande = new Date(req.body.dateCommande);
+    if (req.body.status) updates.status = req.body.status;
+    if (req.body.remise !== undefined)
+      updates.remise = parseFloat(req.body.remise);
+    if (req.body.remiseType) updates.remiseType = req.body.remiseType;
+    if (req.body.notes !== undefined) updates.notes = req.body.notes;
+    if (req.body.taxMode) updates.taxMode = req.body.taxMode;
+
+    // --- Update relations ---
+    if (req.body.client_id) {
+      const client = await clientRepo.findOneBy({
+        id: parseInt(req.body.client_id),
+      });
+      if (!client)
+        return res.status(404).json({ message: "Client non trouvé" });
+      updates.client = client;
+    }
+
+    if (req.body.vendeur_id) {
+      const vendeur = await vendeurRepo.findOneBy({
+        id: parseInt(req.body.vendeur_id),
+      });
+      if (!vendeur)
+        return res.status(404).json({ message: "Vendeur non trouvé" });
+      updates.vendeur = vendeur;
+    }
+
+    // --- Apply updates to parent only ---
+    await devisRepo.update(devis.id, updates);
+
+    // --- Handle articles ---
+    if (req.body.articles && Array.isArray(req.body.articles)) {
+      for (const item of req.body.articles) {
+        const article = await articleRepo.findOneBy({
+          id: parseInt(item.article_id),
+        });
+        if (!article) {
+          return res
+            .status(404)
+            .json({ message: `Article avec ID ${item.article_id} non trouvé` });
+        }
+
+        const prixUnitaire = parseFloat(item.prix_unitaire);
+        const tvaRate = item.tva ? parseFloat(item.tva) : 0;
+        
+        // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
+        const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
+
+        // check if article already exists in devis
+        const existing = await devisArticleRepo.findOne({
+          where: {
+            devisClient: { id: devis.id },
+            article: { id: article.id },
+          },
+          relations: ["article", "devisClient"],
+        });
+
+        if (existing) {
+          // --- Update existing line ---
+          existing.quantite = parseInt(item.quantite);
+          existing.prixUnitaire = prixUnitaire;
+          existing.prix_ttc = +prix_ttc.toFixed(3); // ADD THIS LINE - update TTC price
+          existing.tva = tvaRate;
+          existing.remise = item.remise ? parseFloat(item.remise) : null;
+
+          await devisArticleRepo.save(existing);
+        } else {
+          // --- Insert new line ---
+          const devisArticle = devisArticleRepo.create({
+            devisClient: { id: devis.id }, // attach by ID
+            article,
+            quantite: parseInt(item.quantite),
+            prixUnitaire,
+            prix_ttc: +prix_ttc.toFixed(3), // ADD THIS LINE - calculated TTC price
+            tva: tvaRate,
+            remise: item.remise ? parseFloat(item.remise) : null,
+          });
+
+          await devisArticleRepo.save(devisArticle);
+        }
+      }
+    }
+
+    // --- Reload final devis with fresh data ---
+    const updatedDevis = await devisRepo.findOne({
+      where: { id: devis.id },
+      relations: ["client", "vendeur", "articles", "articles.article"],
+    });
+
+    res.json(updatedDevis);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
 exports.createDevisClient = async (req, res) => {
   try {
     const {
@@ -38,11 +155,11 @@ exports.createDevisClient = async (req, res) => {
     }
 
     const client = await clientRepo.findOneBy({ id: parseInt(client_id) });
-    if (!client) return res.status(404).json({ message: "Client non trouv�" });
+    if (!client) return res.status(404).json({ message: "Client non trouvé" });
 
     const vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
     if (!vendeur)
-      return res.status(404).json({ message: "Vendeur non trouv�" });
+      return res.status(404).json({ message: "Vendeur non trouvé" });
 
     const devis = {
       numeroCommande,
@@ -69,23 +186,27 @@ exports.createDevisClient = async (req, res) => {
       if (!article) {
         return res
           .status(404)
-          .json({ message: `Article avec ID ${item.article_id} non trouv�` });
+          .json({ message: `Article avec ID ${item.article_id} non trouvé` });
       }
 
       let prixUnitaire = parseFloat(item.prix_unitaire);
-      const tvaRate = item.tva || 0;
+      const tvaRate = item.tva ? parseFloat(item.tva) : 0;
 
       if (!item.quantite || !item.prix_unitaire) {
         return res.status(400).json({
           message:
-            "Quantit� et prix unitaire sont obligatoires pour chaque article",
+            "Quantité et prix unitaire sont obligatoires pour chaque article",
         });
       }
+
+      // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
+      const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
 
       const devisArticle = {
         article,
         quantite: parseInt(item.quantite),
         prixUnitaire,
+        prix_ttc: +prix_ttc.toFixed(3), // ADD THIS LINE - calculated TTC price
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
       };

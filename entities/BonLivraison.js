@@ -63,6 +63,8 @@ const BonLivraisonArticle = new EntitySchema({
         id: { primary: true, type: "int", generated: true },
         quantite: { type: "int" },
         prix_unitaire: { type: "decimal", precision: 10, scale: 3 },
+        prix_ttc: { type: "decimal", precision: 10, scale: 3 , nullable: true }, // Add this
+
         tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
         remise: { type: "decimal", precision: 5, scale: 3, nullable: true, default: null }
     },

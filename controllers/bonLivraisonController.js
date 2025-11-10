@@ -1,6 +1,12 @@
 const { AppDataSource } = require("../db");
-const { BonLivraison, BonLivraisonArticle } = require("../entities/BonLivraison");
-const { BonCommandeClient, BonCommandeClientArticle } = require("../entities/BonCommandeClient");
+const {
+  BonLivraison,
+  BonLivraisonArticle,
+} = require("../entities/BonLivraison");
+const {
+  BonCommandeClient,
+  BonCommandeClientArticle,
+} = require("../entities/BonCommandeClient");
 const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
 const { Vendeur } = require("../entities/Vendeur");
@@ -97,8 +103,7 @@ exports.createBonLivraison = async (req, res) => {
           console.log(`Quantité nulle ou négative pour ${article.designation} dans ce BL, ignorée`);
           continue; // Skip zero or negative quantities for this BL
         }
-
-        // ✅ Check stock availability
+  
     
         // ✅ Reduce stock for this BL delivery
         article.qte -= quantiteSouhaiteePourCeBL;
@@ -120,6 +125,7 @@ exports.createBonLivraison = async (req, res) => {
           article,
           quantite: quantiteSouhaiteePourCeBL, // Store only the quantity for THIS BL
           prix_unitaire,
+          prix_ttc: prix_unitaire * (1 + tvaRate / 100), // Make sure this line exists
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : null,
         });
@@ -144,7 +150,7 @@ exports.createBonLivraison = async (req, res) => {
       console.log(`Statut BC mis à jour: ${bcStatus}, Total commandé: ${totalOrdered}, Total livré: ${totalAfterThisBL}`);
 
     } else {
-      // BL without BC (direct delivery) - Keep original logic
+      // BL without BC (direct delivery) - FIXED: Use quantite instead of quantiteLivree
       client = await clientRepo.findOneBy({ id: parseInt(client_id) });
       vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
 
@@ -160,7 +166,8 @@ exports.createBonLivraison = async (req, res) => {
           return res.status(404).json({ message: `Article ${item.article_id} introuvable` });
         }
 
-        const quantitePourStock = parseInt(item.quantiteLivree) || 0;
+        // ✅ FIXED: Use quantite for direct BL creation (not quantiteLivree)
+        const quantitePourStock = parseInt(item.quantite) || 0;
 
         // Skip if no delivery requested
         if (quantitePourStock <= 0) {
@@ -168,8 +175,7 @@ exports.createBonLivraison = async (req, res) => {
         }
 
         // Check stock availability
-      
-
+  
         let prix_unitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : article.tva || 0;
 
@@ -186,6 +192,7 @@ exports.createBonLivraison = async (req, res) => {
           article,
           quantite: quantitePourStock,
           prix_unitaire,
+          prix_ttc: prix_unitaire * (1 + tvaRate / 100), // Make sure this line exists
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : null,
         });
@@ -238,10 +245,14 @@ exports.updateBonLivraison = async (req, res) => {
 
   try {
     const bonRepo = queryRunner.manager.getRepository(BonLivraison);
-    const bonArticleRepo = queryRunner.manager.getRepository(BonLivraisonArticle);
+    const bonArticleRepo =
+      queryRunner.manager.getRepository(BonLivraisonArticle);
     const articleRepo = queryRunner.manager.getRepository(Article);
-    const bonCmdClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
-    const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+    const bonCmdClientRepo =
+      queryRunner.manager.getRepository(BonCommandeClient);
+    const bonCmdArticleRepo = queryRunner.manager.getRepository(
+      BonCommandeClientArticle
+    );
 
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
@@ -252,7 +263,7 @@ exports.updateBonLivraison = async (req, res) => {
         "vendeur",
         "bonCommandeClient",
         "bonCommandeClient.articles",
-        "bonCommandeClient.articles.article"
+        "bonCommandeClient.articles.article",
       ],
     });
 
@@ -261,17 +272,13 @@ exports.updateBonLivraison = async (req, res) => {
       return res.status(404).json({ message: "Bon de livraison introuvable" });
     }
 
-    const {
-      dateLivraison,
-      remise,
-      remiseType,
-      notes,
-      taxMode,
-      articles,
-    } = req.body;
+    const { dateLivraison, remise, remiseType, notes, taxMode, articles } =
+      req.body;
 
     // ✅ RULE: BL status is always "Livré" - remove from updateable fields
-    bon.dateLivraison = dateLivraison ? new Date(dateLivraison) : bon.dateLivraison;
+    bon.dateLivraison = dateLivraison
+      ? new Date(dateLivraison)
+      : bon.dateLivraison;
     bon.remise = remise !== undefined ? remise : bon.remise;
     bon.remiseType = remiseType || bon.remiseType;
     bon.notes = notes || bon.notes;
@@ -284,9 +291,9 @@ exports.updateBonLivraison = async (req, res) => {
       if (bon.bonCommandeClient) {
         for (const oldItem of bon.articles) {
           const bonCmdArticle = bon.bonCommandeClient.articles.find(
-            a => a.article.id === oldItem.article.id
+            (a) => a.article.id === oldItem.article.id
           );
-          
+
           if (bonCmdArticle) {
             // ✅ Restaurer l'ancienne quantité livrée dans BC
             bonCmdArticle.quantiteLivree -= oldItem.quantite;
@@ -298,7 +305,9 @@ exports.updateBonLivraison = async (req, res) => {
           }
 
           // ✅ Restaurer le stock
-          const articleEntity = await articleRepo.findOneBy({ id: oldItem.article.id });
+          const articleEntity = await articleRepo.findOneBy({
+            id: oldItem.article.id,
+          });
           if (articleEntity) {
             articleEntity.qte += oldItem.quantite;
             articleEntity.qte_physique += oldItem.quantite;
@@ -308,7 +317,9 @@ exports.updateBonLivraison = async (req, res) => {
       } else {
         // ✅ Restaurer le stock pour les BL sans BC
         for (const oldItem of bon.articles) {
-          const articleEntity = await articleRepo.findOneBy({ id: oldItem.article.id });
+          const articleEntity = await articleRepo.findOneBy({
+            id: oldItem.article.id,
+          });
           if (articleEntity) {
             articleEntity.qte += oldItem.quantite;
             articleEntity.qte_physique += oldItem.quantite;
@@ -324,10 +335,14 @@ exports.updateBonLivraison = async (req, res) => {
       const newArticles = [];
 
       for (const item of articles) {
-        const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
+        const article = await articleRepo.findOneBy({
+          id: parseInt(item.article_id),
+        });
         if (!article) {
           await queryRunner.rollbackTransaction();
-          return res.status(404).json({ message: `Article ${item.article_id} introuvable` });
+          return res
+            .status(404)
+            .json({ message: `Article ${item.article_id} introuvable` });
         }
 
         let prix_unitaire = parseFloat(item.prix_unitaire);
@@ -341,17 +356,18 @@ exports.updateBonLivraison = async (req, res) => {
         // ✅ Handle quantity control for BC-linked BL
         if (bon.bonCommandeClient) {
           const bonCmdArticle = bon.bonCommandeClient.articles.find(
-            a => a.article.id === parseInt(item.article_id)
+            (a) => a.article.id === parseInt(item.article_id)
           );
-          
+
           if (bonCmdArticle) {
-            const quantiteRestante = bonCmdArticle.quantite - bonCmdArticle.quantiteLivree;
-            
+            const quantiteRestante =
+              bonCmdArticle.quantite - bonCmdArticle.quantiteLivree;
+
             // ✅ RULE: Control that delivered quantity doesn't exceed remaining quantity
             if (quantite > quantiteRestante) {
               await queryRunner.rollbackTransaction();
               return res.status(400).json({
-                message: `Quantité invalide pour l'article ${article.designation}. Quantité restante: ${quantiteRestante}, Tentative de livraison: ${quantite}`
+                message: `Quantité invalide pour l'article ${article.designation}. Quantité restante: ${quantiteRestante}, Tentative de livraison: ${quantite}`,
               });
             }
 
@@ -384,11 +400,17 @@ exports.updateBonLivraison = async (req, res) => {
       if (bon.bonCommandeClient) {
         const updatedBonCmd = await bonCmdClientRepo.findOne({
           where: { id: bon.bonCommandeClient.id },
-          relations: ["articles"]
+          relations: ["articles"],
         });
 
-        let totalQuantiteBC = updatedBonCmd.articles.reduce((sum, item) => sum + item.quantite, 0);
-        let totalLivreeBC = updatedBonCmd.articles.reduce((sum, item) => sum + item.quantiteLivree, 0);
+        let totalQuantiteBC = updatedBonCmd.articles.reduce(
+          (sum, item) => sum + item.quantite,
+          0
+        );
+        let totalLivreeBC = updatedBonCmd.articles.reduce(
+          (sum, item) => sum + item.quantiteLivree,
+          0
+        );
 
         let bcStatus = "Confirme";
         if (totalLivreeBC === totalQuantiteBC && totalQuantiteBC > 0) {
@@ -434,19 +456,23 @@ exports.deleteBonLivraison = async (req, res) => {
 
   try {
     const bonRepo = queryRunner.manager.getRepository(BonLivraison);
-    const bonArticleRepo = queryRunner.manager.getRepository(BonLivraisonArticle);
+    const bonArticleRepo =
+      queryRunner.manager.getRepository(BonLivraisonArticle);
     const articleRepo = queryRunner.manager.getRepository(Article);
-    const bonCmdClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
-    const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+    const bonCmdClientRepo =
+      queryRunner.manager.getRepository(BonCommandeClient);
+    const bonCmdArticleRepo = queryRunner.manager.getRepository(
+      BonCommandeClientArticle
+    );
 
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
       relations: [
-        "articles", 
-        "articles.article", 
+        "articles",
+        "articles.article",
         "bonCommandeClient",
         "bonCommandeClient.articles",
-        "bonCommandeClient.articles.article"
+        "bonCommandeClient.articles.article",
       ],
     });
 
@@ -457,7 +483,9 @@ exports.deleteBonLivraison = async (req, res) => {
 
     // ✅ RULE: Restore stock before deleting
     for (const item of bon.articles) {
-      const articleEntity = await articleRepo.findOneBy({ id: item.article.id });
+      const articleEntity = await articleRepo.findOneBy({
+        id: item.article.id,
+      });
       if (articleEntity) {
         articleEntity.qte += item.quantite;
         articleEntity.qte_physique += item.quantite;
@@ -469,9 +497,9 @@ exports.deleteBonLivraison = async (req, res) => {
     if (bon.bonCommandeClient) {
       for (const item of bon.articles) {
         const bonCmdArticle = bon.bonCommandeClient.articles.find(
-          a => a.article.id === item.article.id
+          (a) => a.article.id === item.article.id
         );
-        
+
         if (bonCmdArticle) {
           bonCmdArticle.quantiteLivree -= item.quantite;
           // Ensure quantiteLivree doesn't go below 0
@@ -485,11 +513,17 @@ exports.deleteBonLivraison = async (req, res) => {
       // ✅ Mettre à jour le statut du bon de commande
       const updatedBonCmd = await bonCmdClientRepo.findOne({
         where: { id: bon.bonCommandeClient.id },
-        relations: ["articles"]
+        relations: ["articles"],
       });
 
-      let totalQuantiteBC = updatedBonCmd.articles.reduce((sum, item) => sum + item.quantite, 0);
-      let totalLivreeBC = updatedBonCmd.articles.reduce((sum, item) => sum + item.quantiteLivree, 0);
+      let totalQuantiteBC = updatedBonCmd.articles.reduce(
+        (sum, item) => sum + item.quantite,
+        0
+      );
+      let totalLivreeBC = updatedBonCmd.articles.reduce(
+        (sum, item) => sum + item.quantiteLivree,
+        0
+      );
 
       let bcStatus = "Confirme";
       if (totalLivreeBC === totalQuantiteBC && totalQuantiteBC > 0) {
@@ -524,7 +558,6 @@ exports.deleteBonLivraison = async (req, res) => {
 };
 
 // ✅ DELETE - Restore everything properly
-
 
 exports.annulerBonLivraison = async (req, res) => {
   try {
@@ -603,9 +636,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
   }
 };
 
-
 // ✅ DELETE — restore article quantities and update BC status before deleting bon
-
 
 exports.annulerBonLivraison = async (req, res) => {
   try {
@@ -683,8 +714,6 @@ exports.getNextLivraisonNumber = async (req, res) => {
     });
   }
 };
-
-
 
 exports.getAllBonLivraisons = async (req, res) => {
   try {

@@ -12,10 +12,10 @@ router.get('/getvendeur', vendeurController.getAllVendeurs);
 router.get('/:id', vendeurController.getVendeurById);
 
 // Update a salesperson
-router.put('/:id', vendeurController.updateVendeur);
+router.put('/updateVendeur/:id', vendeurController.updateVendeur);
 
 // Delete a salesperson
-router.delete('/:id', vendeurController.deleteVendeur);
+router.delete('/deletevendeur/:id', vendeurController.deleteVendeur);
 
 // Get salesperson statistics (optional)
 router.get('/:id/stats', vendeurController.getVendeurStats);

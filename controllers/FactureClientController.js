@@ -164,22 +164,29 @@ exports.createFactureClient = async (req, res) => {
           .status(404)
           .json({ message: `Article avec ID ${item.article_id} non trouvé` });
       }
-
+    
       if (!item.quantite || !item.prix_unitaire) {
         return res.status(400).json({
           message:
             "Quantité et prix unitaire sont obligatoires pour chaque article",
         });
       }
-
+    
+      const prixUnitaire = parseFloat(item.prix_unitaire);
+      const tvaRate = item.tva ? parseFloat(item.tva) : 0;
+      
+      // Calculate prix_ttc based on prix_unitaire and TVA
+      const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
+    
       const factureArticle = {
         article: articleEntity,
         quantite: parseInt(item.quantite),
-        prixUnitaire: parseFloat(item.prix_unitaire),
-        tva: item.tva ? parseFloat(item.tva) : 0,
+        prixUnitaire: prixUnitaire,
+        prix_ttc: +prix_ttc.toFixed(3), // Calculate TTC on backend
+        tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : 0,
       };
-
+    
       facture.articles.push(factureArticle);
     }
 
@@ -263,34 +270,42 @@ exports.updateFactureClient = async (req, res) => {
     }
 
     // Articles
-    if (articles && Array.isArray(articles)) {
-      console.log(articles);
-      const newArticles = [];
-      for (const item of articles) {
-        const articleEntity = await articleRepo.findOneBy({
-          id: parseInt(item.article_id),
-        });
-        if (!articleEntity) {
-          return res
-            .status(404)
-            .json({ message: `Article ${item.article_id} non trouvé` });
-        }
-
-        const factureArticle = {
-          article: articleEntity,
-          quantite: parseInt(item.quantite),
-          prixUnitaire: parseFloat(item.prix_unitaire),
-          tva: item.tva ? parseFloat(item.tva) : 0,
-          remise: item.remise ? parseFloat(item.remise) : 0,
-        };
-
-        console.log(factureArticle);
-        newArticles.push(factureArticle);
-      }
-
-      // Remplace les anciens articles → grâce à cascade + onDelete: "CASCADE"
-      facture.articles = newArticles;
+  // Articles
+if (articles && Array.isArray(articles)) {
+  console.log(articles);
+  const newArticles = [];
+  for (const item of articles) {
+    const articleEntity = await articleRepo.findOneBy({
+      id: parseInt(item.article_id),
+    });
+    if (!articleEntity) {
+      return res
+        .status(404)
+        .json({ message: `Article ${item.article_id} non trouvé` });
     }
+    
+    const prixUnitaire = parseFloat(item.prix_unitaire);
+    const tvaRate = item.tva ? parseFloat(item.tva) : 0;
+    
+    // Calculate prix_ttc based on prix_unitaire and TVA
+    const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
+
+    const factureArticle = {
+      article: articleEntity,
+      quantite: parseInt(item.quantite),
+      prixUnitaire: prixUnitaire,
+      prix_ttc: +prix_ttc.toFixed(3), // Calculate TTC on backend
+      tva: tvaRate,
+      remise: item.remise ? parseFloat(item.remise) : 0,
+    };
+
+    console.log(factureArticle);
+    newArticles.push(factureArticle);
+  }
+
+  // Remplace les anciens articles → grâce à cascade + onDelete: "CASCADE"
+  facture.articles = newArticles;
+}
 
     // Sauvegarde
     const updatedFacture = await factureRepo.save(facture);
@@ -357,33 +372,35 @@ exports.annulerFactureClient = async (req, res) => {
 exports.getNextFactureNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "FAC";
-
+    const prefix = "FAC-";
     const repo = AppDataSource.getRepository(FactureClient);
 
-    // Get the last numeroFacture for this year
+    // Get the last facture for the current year
     const lastFacture = await repo
       .createQueryBuilder("fact")
-      .where("fact.numeroFacture LIKE :pattern", {
-        pattern: `${prefix}-%/${year}`,
-      })
-      .orderBy("fact.numeroFacture", "DESC")
+      .where("fact.numeroFacture LIKE :pattern", { pattern: `${prefix}%/${year}` })
+      .orderBy("fact.createdAt", "DESC") // ensure sorting by creation time
       .getOne();
 
-    let nextNumber = 1;
+    let nextNumber;
 
-    if (lastFacture && lastFacture.numeroFacture) {
-      const match = lastFacture.numeroFacture.match(
-        new RegExp(`^${prefix}-(\\d{4})/${year}$`)
-      );
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
+    if (!lastFacture || !lastFacture.numeroFacture) {
+      nextNumber = 1;
+    } else {
+      // Match format FAC-001/2025
+      const match = lastFacture.numeroFacture.match(new RegExp(`^${prefix}(\\d{3})/${year}$`));
+      nextNumber = match ? parseInt(match[1], 10) + 1 : 1;
     }
 
-    const nextFactureNumber = `${prefix}-${nextNumber
-      .toString()
-      .padStart(3, "0")}/${year}`;
+    let nextFactureNumber;
+
+    // Ensure unique number — skip duplicates if already exists
+    while (true) {
+      nextFactureNumber = `${prefix}${String(nextNumber).padStart(3, "0")}/${year}`;
+      const existing = await repo.findOne({ where: { numeroFacture: nextFactureNumber } });
+      if (!existing) break;
+      nextNumber++;
+    }
 
     res.json({ numeroFacture: nextFactureNumber });
   } catch (err) {
@@ -394,3 +411,4 @@ exports.getNextFactureNumber = async (req, res) => {
     });
   }
 };
+

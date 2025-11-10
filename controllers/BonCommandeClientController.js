@@ -4,6 +4,7 @@ const { Client } = require("../entities/Client");
 const { ClientWebsite } = require("../entities/ClientWebsite");
 const { Vendeur } = require("../entities/Vendeur");
 const { BonCommandeClient, BonCommandeClientArticle } = require("../entities/BonCommandeClient");
+const { BonLivraison, BonLivraisonArticle } = require("../entities/BonLivraison");
 
 exports.createBonCommandeClient = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -133,6 +134,7 @@ exports.createBonCommandeClient = async (req, res) => {
         quantite: quantite,
         quantiteLivree: quantiteLivree, // ✅ Store the initial delivered quantity
         prixUnitaire,
+        prix_ttc: prixUnitaire * (1 + tvaRate / 100),
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
       };
@@ -162,6 +164,7 @@ exports.createBonCommandeClient = async (req, res) => {
     await queryRunner.release();
   }
 };
+
 exports.updateBonCommandeClient = async (req, res) => {
   try {
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
@@ -186,9 +189,9 @@ exports.updateBonCommandeClient = async (req, res) => {
       where: { bonCommandeClient: { id: bon.id } }
     });
 
-    if (linkedBLs.length > 0 && req.body.articles) {
+    if (linkedBLs.length > 0) {
       return res.status(400).json({
-        message: "Impossible de modifier les articles ou les quantités livrées car ce bon de commande est lié à des bons de livraison. Veuillez gérer les livraisons via les bons de livraison."
+        message: "Impossible de modifier ce bon de commande car il est lié à des bons de livraison"
       });
     }
 
@@ -295,9 +298,15 @@ exports.updateBonCommandeClient = async (req, res) => {
           return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouvé` });
         }
 
-        const prixUnitaire = parseFloat(item.prix_unitaire);
+        let prixUnitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
         const quantiteLivree = parseInt(item.quantiteLivree) || 0;
+
+        // ✅ ADDED: Calculate prix_ttc exactly like in create function
+        if (req.body.taxMode === "TTC") {
+          prixUnitaire = prixUnitaire / (1 + tvaRate / 100);
+        }
+        const prix_ttc = prixUnitaire * (1 + tvaRate / 100);
 
         const existing = await bonArticleRepo.findOne({
           where: {
@@ -317,6 +326,7 @@ exports.updateBonCommandeClient = async (req, res) => {
           existing.quantite = parseInt(item.quantite);
           existing.quantiteLivree = quantiteLivree;
           existing.prixUnitaire = prixUnitaire;
+          existing.prix_ttc = prix_ttc; // ✅ ADDED: Set prix_ttc
           existing.tva = tvaRate;
           existing.remise = item.remise ? parseFloat(item.remise) : null;
           await bonArticleRepo.save(existing);
@@ -329,6 +339,7 @@ exports.updateBonCommandeClient = async (req, res) => {
             quantite: parseInt(item.quantite),
             quantiteLivree: quantiteLivree,
             prixUnitaire,
+            prix_ttc: prix_ttc, // ✅ ADDED: Set prix_ttc
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           });
@@ -454,47 +465,48 @@ exports.annulerBonCommandeClient = async (req, res) => {
 exports.getNextCommandeNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "BC";
-
+    const prefix = "BC-";
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
 
+    // Get last BonCommande for this year
     const lastBon = await bonRepo
       .createQueryBuilder("bon")
-      .where("bon.numeroCommande LIKE :pattern", {
-        pattern: `${prefix}-%/${year}`,
-      })
+      .where("bon.numeroCommande LIKE :pattern", { pattern: `${prefix}%/${year}` })
       .orderBy("bon.createdAt", "DESC")
       .getOne();
 
+    let nextNumber;
+    if (!lastBon || !lastBon.numeroCommande) {
+      nextNumber = 1; // Start from BC001/year
+    } else {
+      const match = lastBon.numeroCommande.match(new RegExp(`^${prefix}(\\d{3})/${year}$`));
+      nextNumber = match ? parseInt(match[1], 10) + 1 : 1;
+    }
+
     let nextCommandeNumber;
 
-    if (!lastBon || !lastBon.numeroCommande) {
-      nextCommandeNumber = `${prefix}-0001/${year}`;
-    } else {
-      const match = lastBon.numeroCommande.match(
-        new RegExp(`^${prefix}-(\\d{4})/${year}$`)
-      );
-      if (match) {
-        const current = parseInt(match[1], 10);
-        const next = current + 1;
-        nextCommandeNumber = `${prefix}-${String(next).padStart(
-          3,
-          "0"
-        )}/${year}`;
-      } else {
-        nextCommandeNumber = `${prefix}-0001/${year}`;
-      }
+    while (true) {
+      // Format next number (e.g., BC005/2025)
+      nextCommandeNumber = `${prefix}${String(nextNumber).padStart(3, "0")}/${year}`;
+
+      // Check if it already exists
+      const existing = await bonRepo.findOne({ where: { numeroCommande: nextCommandeNumber } });
+
+      if (!existing) break; // unique number found → exit loop
+      nextNumber++; // otherwise, increment and try next one
     }
 
     res.json({ numeroCommande: nextCommandeNumber });
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Erreur lors de la g�n�ration du num�ro",
+      message: "Erreur lors de la génération du numéro",
       error: err.message,
     });
   }
 };
+
+
 exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
   try {
     const {

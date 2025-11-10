@@ -67,6 +67,8 @@ const BonCommandeClientArticle = new EntitySchema({
             default: 0  // ✅ AJOUTEZ CETTE LIGNE
         },
         prixUnitaire: { type: "decimal", precision: 10, scale: 3 },
+        prix_ttc: { type: "decimal", precision: 10, scale: 3 , nullable : true },
+
         tva: {
             type: "decimal",
             precision: 5,
