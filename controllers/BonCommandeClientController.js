@@ -465,7 +465,7 @@ exports.annulerBonCommandeClient = async (req, res) => {
 exports.getNextCommandeNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "BC-";
+    const prefix = "COMMANDE-";
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
 
     // Get last BonCommande for this year
@@ -477,7 +477,7 @@ exports.getNextCommandeNumber = async (req, res) => {
 
     let nextNumber;
     if (!lastBon || !lastBon.numeroCommande) {
-      nextNumber = 1; // Start from BC001/year
+      nextNumber = 1; // Start from COMMANDE001/year
     } else {
       const match = lastBon.numeroCommande.match(new RegExp(`^${prefix}(\\d{3})/${year}$`));
       nextNumber = match ? parseInt(match[1], 10) + 1 : 1;

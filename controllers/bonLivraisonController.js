@@ -597,7 +597,7 @@ exports.annulerBonLivraison = async (req, res) => {
 exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "BL";
+    const prefix = "LIVRAISON";
 
     const repo = AppDataSource.getRepository(BonLivraison);
 

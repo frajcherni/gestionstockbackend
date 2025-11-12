@@ -46,8 +46,8 @@ const upload = multer({
 const uploadMiddleware = upload.single('image');
 
 exports.createArticle = async (req, res) => {
-  // First, handle the file upload
-  uploadMiddleware(req, res, async function(err) {
+  // Handle the file upload
+  uploadMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
     }
@@ -55,42 +55,40 @@ exports.createArticle = async (req, res) => {
     try {
       console.log('=== REQUEST BODY ===', req.body);
       console.log('=== REQUEST FILE ===', req.file);
-      
-      // Check if we have the required fields
-      if (!req.body.reference || !req.body.designation || !req.body.fournisseur_id || !req.body.categorie_id) {
-        // Delete uploaded file if validation fails
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
-        return res.status(400).json({ 
-          message: 'Reference, designation, fournisseur_id, and categorie_id are required' 
-        });
-      }
 
       const fournisseurRepo = AppDataSource.getRepository(Fournisseur);
       const categorieRepo = AppDataSource.getRepository(Categorie);
       const articleRepo = AppDataSource.getRepository(Article);
 
-      const fournisseur = await fournisseurRepo.findOneBy({ id: parseInt(req.body.fournisseur_id) });
-      const categorie = await categorieRepo.findOneBy({ id: parseInt(req.body.categorie_id) });
+      let fournisseur = null;
+      let categorie = null;
 
-      if (!fournisseur || !categorie) {
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
-        return res.status(400).json({ message: 'Fournisseur or Categorie not found' });
+      // Load fournisseur if provided
+      if (req.body.fournisseur_id) {
+        fournisseur = await fournisseurRepo.findOneBy({
+          id: parseInt(req.body.fournisseur_id),
+        });
       }
 
-      // Handle subcategory if provided
+      // Load categorie if provided
+      if (req.body.categorie_id) {
+        categorie = await categorieRepo.findOneBy({
+          id: parseInt(req.body.categorie_id),
+        });
+      }
+
+      // Handle sousCategorie if provided
       let sousCategorie = null;
       if (req.body.sous_categorie_id) {
-        sousCategorie = await categorieRepo.findOneBy({ id: parseInt(req.body.sous_categorie_id) });
+        sousCategorie = await categorieRepo.findOneBy({
+          id: parseInt(req.body.sous_categorie_id),
+        });
       }
 
       const article = articleRepo.create({
-        reference: req.body.reference,
-        designation: req.body.designation,
-        nom: req.body.nom || req.body.designation || req.body.reference,
+        reference: req.body.reference || '',
+        designation: req.body.designation || '',
+        nom: req.body.nom || req.body.designation || req.body.reference || '',
         qte: parseInt(req.body.qte) || 0,
         qte_virtual: parseInt(req.body.qte) || 0,
         pua_ht: parseFloat(req.body.pua_ht) || 0,
@@ -103,7 +101,7 @@ exports.createArticle = async (req, res) => {
         fournisseur,
         categorie,
         sousCategorie,
-        image: req.file ? req.file.path : null
+        image: req.file ? req.file.path : null,
       });
 
       const savedArticle = await articleRepo.save(article);
@@ -113,12 +111,10 @@ exports.createArticle = async (req, res) => {
       if (savedArticle.image) {
         savedArticle.image = `${req.protocol}://${req.get('host')}/${savedArticle.image}`;
       }
-      
-      res.status(201).json(savedArticle);
 
+      res.status(201).json(savedArticle);
     } catch (error) {
       console.error('❌ Error creating article:', error);
-      // Delete uploaded file if there's an error
       if (req.file) {
         fs.unlinkSync(req.file.path);
       }
@@ -126,6 +122,7 @@ exports.createArticle = async (req, res) => {
     }
   });
 };
+
 
 exports.getAllArticles = async (req, res) => {
   try {

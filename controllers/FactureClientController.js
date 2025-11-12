@@ -372,43 +372,36 @@ exports.annulerFactureClient = async (req, res) => {
 exports.getNextFactureNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "FAC-";
+    const prefix = "FACTURE";
+
     const repo = AppDataSource.getRepository(FactureClient);
 
-    // Get the last facture for the current year
+    // Get the last numeroFacture for this year
     const lastFacture = await repo
       .createQueryBuilder("fact")
-      .where("fact.numeroFacture LIKE :pattern", { pattern: `${prefix}%/${year}` })
-      .orderBy("fact.createdAt", "DESC") // ensure sorting by creation time
+      .where("fact.numeroFacture LIKE :pattern", { pattern: `${prefix}-%/${year}` })
+      .orderBy("fact.id", "DESC")
       .getOne();
 
-    let nextNumber;
+    let nextNumber = 1;
 
-    if (!lastFacture || !lastFacture.numeroFacture) {
-      nextNumber = 1;
-    } else {
-      // Match format FAC-001/2025
-      const match = lastFacture.numeroFacture.match(new RegExp(`^${prefix}(\\d{3})/${year}$`));
-      nextNumber = match ? parseInt(match[1], 10) + 1 : 1;
+    if (lastFacture) {
+      // Extract the numeric part between "-" and "/"
+      const match = lastFacture.numeroFacture.match(/FACTURE-(\d+)\/\d{4}/);
+      if (match && match[1]) {
+        nextNumber = parseInt(match[1]) + 1;
+      }
     }
 
-    let nextFactureNumber;
+    // Format number with 3 digits (e.g., 001)
+    const formattedNumber = nextNumber.toString().padStart(3, '0');
 
-    // Ensure unique number — skip duplicates if already exists
-    while (true) {
-      nextFactureNumber = `${prefix}${String(nextNumber).padStart(3, "0")}/${year}`;
-      const existing = await repo.findOne({ where: { numeroFacture: nextFactureNumber } });
-      if (!existing) break;
-      nextNumber++;
-    }
+    // Final format: FACTURE-001/2025
+    const newNumeroFacture = `${prefix}-${formattedNumber}/${year}`;
 
-    res.json({ numeroFacture: nextFactureNumber });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: "Erreur lors de la génération du numéro de facture",
-      error: err.message,
-    });
+    res.status(200).json({ numeroFacture: newNumeroFacture });
+  } catch (error) {
+    console.error('❌ Error generating facture number:', error);
+    res.status(500).json({ message: error.message });
   }
 };
-
