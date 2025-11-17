@@ -7,6 +7,7 @@ const { Between } = require("typeorm");
 const moment = require("moment");
 
 
+// controllers/TresorieController.js - Updated version
 exports.getTrésorerieData = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
@@ -20,8 +21,6 @@ exports.getTrésorerieData = async (req, res) => {
 
         const start = moment(startDate).startOf('day').toDate();
         const end = moment(endDate).endOf('day').toDate();
-
-        console.log(`Fetching data from ${start} to ${end}`);
 
         // Get repositories
         const venteRepo = AppDataSource.getRepository(VenteComptoire);
@@ -39,60 +38,33 @@ exports.getTrésorerieData = async (req, res) => {
                 where: {
                     date: Between(start, end)
                 },
-                order: {
-                    date: 'ASC'
-                }
+                relations: ['client']
             }),
             paiementRepo.find({
                 where: {
                     datePaiement: Between(start, end)
                 },
-                relations: ['factureFournisseur'], // Add relation to see linked data
-                order: {
-                    datePaiement: 'ASC'
-                }
+                relations: ['factureFournisseur']
             })
         ]);
 
-        // Add detailed logging
-        console.log(`Found ${ventes.length} ventes`);
-        console.log(`Found ${encaissements.length} encaissements clients`);
-        console.log(`Found ${paiementsFournisseurs.length} paiements fournisseurs`);
-
-        // Log individual payments for debugging
-        paiementsFournisseurs.forEach((paiement, index) => {
-            console.log(`Paiement Fournisseur ${index + 1}:`, {
-                id: paiement.id,
-                montant: paiement.montant,
-                datePaiement: paiement.datePaiement,
-                factureId: paiement.factureFournisseur?.id
-            });
-        });
-
-        // Calculate totals with validation
-        const totalVentes = ventes.reduce((sum, vente) => {
-            const amount = Number(vente.totalAfterRemise || 0);
-            return sum + (isNaN(amount) ? 0 : amount);
-        }, 0);
-
-        const totalPaiementsClients = encaissements.reduce((sum, encaissement) => {
-            const amount = Number(encaissement.montant || 0);
-            return sum + (isNaN(amount) ? 0 : amount);
-        }, 0);
-
-        const totalPaiementsFournisseurs = paiementsFournisseurs.reduce((sum, paiement) => {
-            const amount = Number(paiement.montant || 0);
-            return sum + (isNaN(amount) ? 0 : amount);
-        }, 0);
-
+        // Calculate totals
+        const totalVentes = ventes.reduce((sum, vente) => sum + Number(vente.totalAfterRemise || 0), 0);
+        const totalPaiementsClients = encaissements.reduce((sum, encaissement) => sum + Number(encaissement.montant || 0), 0);
+        const totalPaiementsFournisseurs = paiementsFournisseurs.reduce((sum, paiement) => sum + Number(paiement.montant || 0), 0);
         const earnings = totalPaiementsClients - totalPaiementsFournisseurs;
 
-        console.log('Calculated totals:', {
-            totalVentes,
-            totalPaiementsClients,
-            totalPaiementsFournisseurs,
-            earnings
-        });
+        // Calculate payment methods breakdown
+        const paymentMethods = {
+            espece: encaissements.filter(e => e.modePaiement === 'Espece').reduce((sum, e) => sum + Number(e.montant || 0), 0),
+            cheque: encaissements.filter(e => e.modePaiement === 'Cheque').reduce((sum, e) => sum + Number(e.montant || 0), 0),
+            virement: encaissements.filter(e => e.modePaiement === 'Virement').reduce((sum, e) => sum + Number(e.montant || 0), 0),
+            traite: encaissements.filter(e => e.modePaiement === 'Traite').reduce((sum, e) => sum + Number(e.montant || 0), 0),
+            autre: encaissements.filter(e => e.modePaiement === 'Autre').reduce((sum, e) => sum + Number(e.montant || 0), 0)
+        };
+
+        // Get top products (you'll need to implement this based on your data structure)
+        const topProducts = []; // Implement your top products logic here
 
         res.json({
             success: true,
@@ -101,6 +73,8 @@ exports.getTrésorerieData = async (req, res) => {
                 totalPaiementsClients,
                 totalPaiementsFournisseurs,
                 earnings,
+                paymentMethods,
+                topProducts,
                 counts: {
                     ventes: ventes.length,
                     encaissements: encaissements.length,

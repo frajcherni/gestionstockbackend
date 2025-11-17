@@ -20,6 +20,9 @@ const vendeurRoutes = require("./routes/vendeurRoutes");
 const BonLivraisonRoutes = require("./routes/BonLivraisonRoutes");
 const AuthRoutes =  require("./routes/AuthRoutes");
 const TresorieRoutes =  require("./routes/TresorieRoutes");
+const paiementClientRoutes = require("./routes/paiementClientRoutes");
+
+// Use the routes
 
 const app = express();
 app.use('/uploads', express.static('uploads'));
@@ -56,6 +59,7 @@ app.use("/api/EncaissementClient", encaissementClientRoutes);
 app.use("/api/Auth", AuthRoutes);
 app.use("/api/getpayment", TresorieRoutes);
 
+app.use("/api/paiements-client", paiementClientRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ 

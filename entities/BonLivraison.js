@@ -65,8 +65,8 @@ const BonLivraisonArticle = new EntitySchema({
         prix_unitaire: { type: "decimal", precision: 10, scale: 3 },
         prix_ttc: { type: "decimal", precision: 10, scale: 3 , nullable: true }, // Add this
 
-        tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
-        remise: { type: "decimal", precision: 5, scale: 3, nullable: true, default: null }
+        tva: { type: "decimal", precision: 7, scale: 3, nullable: true },
+        remise: { type: "decimal", precision: 10, scale: 3, nullable: true, default: null }
     },
     relations: {
         bonLivraison: {

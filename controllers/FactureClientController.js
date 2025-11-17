@@ -176,17 +176,17 @@ exports.createFactureClient = async (req, res) => {
       const tvaRate = item.tva ? parseFloat(item.tva) : 0;
       
       // Calculate prix_ttc based on prix_unitaire and TVA
-      const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
-    
-      const factureArticle = {
-        article: articleEntity,
-        quantite: parseInt(item.quantite),
-        prixUnitaire: prixUnitaire,
-        prix_ttc: +prix_ttc.toFixed(3), // Calculate TTC on backend
-        tva: tvaRate,
-        remise: item.remise ? parseFloat(item.remise) : 0,
-      };
-    
+    // ✅ FIX: Use prix_ttc sent from frontend instead of calculating it
+const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
+
+const factureArticle = {
+  article: articleEntity,
+  quantite: parseInt(item.quantite),
+  prixUnitaire: prixUnitaire,
+  prix_ttc: +prix_ttc.toFixed(3), // Use the TTC value from frontend
+  tva: tvaRate,
+  remise: item.remise ? parseFloat(item.remise) : 0,
+};
       facture.articles.push(factureArticle);
     }
 
@@ -288,16 +288,17 @@ if (articles && Array.isArray(articles)) {
     const tvaRate = item.tva ? parseFloat(item.tva) : 0;
     
     // Calculate prix_ttc based on prix_unitaire and TVA
-    const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
+  // ✅ FIX: Use prix_ttc sent from frontend instead of calculating it
+const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
 
-    const factureArticle = {
-      article: articleEntity,
-      quantite: parseInt(item.quantite),
-      prixUnitaire: prixUnitaire,
-      prix_ttc: +prix_ttc.toFixed(3), // Calculate TTC on backend
-      tva: tvaRate,
-      remise: item.remise ? parseFloat(item.remise) : 0,
-    };
+const factureArticle = {
+  article: articleEntity,
+  quantite: parseInt(item.quantite),
+  prixUnitaire: prixUnitaire,
+  prix_ttc: +prix_ttc.toFixed(3), // Use the TTC value from frontend
+  tva: tvaRate,
+  remise: item.remise ? parseFloat(item.remise) : 0,
+};
 
     console.log(factureArticle);
     newArticles.push(factureArticle);

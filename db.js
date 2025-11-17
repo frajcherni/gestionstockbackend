@@ -40,6 +40,7 @@ const {
 } = require("./entities/FactureClient");
 const { EncaissementClient } = require("./entities/EncaissementClient");
 const User = require("./entities/User");
+const { PaiementClient } = require("./entities/PaiementClient");
 
 module.exports.AppDataSource = new DataSource({
   type: "postgres",
@@ -74,6 +75,8 @@ module.exports.AppDataSource = new DataSource({
     FactureClientArticle,
     EncaissementClient,
     User,
-    ClientWebsite
+    ClientWebsite,
+    PaiementClient,
+    
   ],
 });

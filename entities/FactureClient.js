@@ -84,10 +84,10 @@ const FactureClientArticle = new EntitySchema({
     prixUnitaire: { type: "decimal", precision: 12, scale: 3 },
     prix_ttc: { type: "decimal", precision: 12, scale: 3 },
 
-    tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
+    tva: { type: "decimal", precision: 7, scale: 3, nullable: true },
     remise: {
       type: "decimal",
-      precision: 5,
+      precision: 10,
       scale: 3,
       nullable: true,
       default: null,

@@ -12,6 +12,14 @@ const BonCommandeClient = new EntitySchema({
             enum: ["Brouillon", "Confirme", "Livre", "Partiellement Livre", "Annule"],
             default: "Confirme"
         },
+
+        totalTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        totalTTCAfterRemise: { type: "decimal", precision: 12, scale: 3, default: 0 },
+
+        // In your BonCommandeClient entity, add these columns:
+montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
+resteAPayer: { type: "decimal", precision: 12, scale: 3, default: 0 },
+hasPayments: { type: "boolean", default: false },
         taxMode: {
             type: "enum",
             enum: ["HT", "TTC"],
@@ -71,13 +79,13 @@ const BonCommandeClientArticle = new EntitySchema({
 
         tva: {
             type: "decimal",
-            precision: 5,
+            precision: 7,
             scale: 3,
             nullable: true
         },
         remise: {
             type: "decimal",
-            precision: 5,
+            precision: 10,
             scale: 3,
             nullable: true,
             default: null

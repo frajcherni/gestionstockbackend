@@ -22,6 +22,9 @@ exports.createBonCommandeClient = async (req, res) => {
       vendeur_id,
       articles,
       taxMode,
+      totalTTC,
+      totalHT,
+      totalTVA,
       clientWebsiteInfo,
     } = req.body;
 
@@ -81,6 +84,9 @@ exports.createBonCommandeClient = async (req, res) => {
       notes: notes || null,
       client,
       clientWebsite,
+      totalHT: parseFloat(totalHT || 0),
+      totalTVA: parseFloat(totalTVA || 0),
+      totalTTC: parseFloat(totalTTC || 0),
       vendeur,
       taxMode,
       articles: [],

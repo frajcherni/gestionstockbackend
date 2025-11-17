@@ -19,6 +19,8 @@ module.exports = new EntitySchema({
     company_address: { type: "text", nullable: true },
     company_city: { type: "varchar", nullable: true },
     company_phone: { type: "varchar", nullable: true },
+    company_gsm: { type: "varchar", nullable: true },
+
     company_email: { type: "varchar", nullable: true },
     company_website: { type: "varchar", nullable: true },
     company_tax_id: { type: "varchar", nullable: true },
