@@ -171,6 +171,172 @@ exports.createBonCommandeClient = async (req, res) => {
   }
 };
 
+
+exports.hhh = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    const {
+      numeroCommande,
+      dateCommande,
+      remise,
+      remiseType,
+      notes,
+      client_id,
+      vendeur_id,
+      articles,
+      taxMode,
+      totalTTC,
+      totalHT,
+      totalTVA,
+      clientWebsiteInfo,
+    } = req.body;
+
+    const clientRepo = queryRunner.manager.getRepository(Client);
+    const clientWebsiteRepo = queryRunner.manager.getRepository(ClientWebsite);
+    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const bonRepo = queryRunner.manager.getRepository(BonCommandeClient);
+
+    // Validate required fields
+    if (!numeroCommande || !dateCommande) {
+      await queryRunner.rollbackTransaction();
+      return res.status(400).json({ message: "Les champs obligatoires sont manquants" });
+    }
+
+    let client = null;
+    let clientWebsite = null;
+    let vendeur = null;
+
+    // Handle Client
+    if (client_id) {
+      client = await clientRepo.findOneBy({ id: parseInt(client_id) });
+      if (!client) {
+        await queryRunner.rollbackTransaction();
+        return res.status(404).json({ message: "Client non trouvé" });
+      }
+    } else if (clientWebsiteInfo) {
+      if (!clientWebsiteInfo.nomPrenom || !clientWebsiteInfo.telephone || !clientWebsiteInfo.adresse) {
+        await queryRunner.rollbackTransaction();
+        return res.status(400).json({ message: "Nom, téléphone et adresse sont obligatoires pour les clients du site web" });
+      }
+      clientWebsite = clientWebsiteRepo.create(clientWebsiteInfo);
+      clientWebsite = await clientWebsiteRepo.save(clientWebsite);
+    } else {
+      await queryRunner.rollbackTransaction();
+      return res.status(400).json({ message: "Informations client requises" });
+    }
+
+    if (vendeur_id) {
+      vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
+    }
+
+    if (!articles || !Array.isArray(articles) || articles.length === 0) {
+      await queryRunner.rollbackTransaction();
+      return res.status(400).json({ message: "Les articles sont requis" });
+    }
+
+    let totalQuantite = 0;
+    let totalLivree = 0;
+
+    const bonCommande = {
+      numeroCommande,
+      dateCommande: new Date(dateCommande),
+      status: "Confirme",
+      remise: remise || 0,
+      remiseType: remiseType,
+      notes: notes || null,
+      client,
+      clientWebsite,
+      totalHT: parseFloat(totalHT || 0),
+      totalTVA: parseFloat(totalTVA || 0),
+      totalTTC: parseFloat(totalTTC || 0),
+      vendeur,
+      taxMode,
+      articles: [],
+    };
+
+    // Process articles - REDUCE STOCK if quantiteLivree > 0
+    for (const item of articles) {
+      const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
+      if (!article) {
+        await queryRunner.rollbackTransaction();
+        return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouvé` });
+      }
+
+      let prixUnitaire = parseFloat(item.prix_unitaire);
+      const tvaRate = item.tva || 0;
+
+      if (taxMode === "TTC") {
+        prixUnitaire = prixUnitaire / (1 + tvaRate / 100);
+      }
+
+      if (!item.quantite || !item.prix_unitaire) {
+        await queryRunner.rollbackTransaction();
+        return res.status(400).json({ message: "Quantité et prix unitaire sont obligatoires" });
+      }
+
+      const quantiteLivree = parseInt(item.quantiteLivree) || 0;
+      const quantite = parseInt(item.quantite);
+
+      // Validate that delivered quantity doesn't exceed ordered quantity
+      if (quantiteLivree > quantite) {
+        await queryRunner.rollbackTransaction();
+        return res.status(400).json({
+          message: `La quantité livrée (${quantiteLivree}) ne peut pas dépasser la quantité commandée (${quantite})`
+        });
+      }
+
+    
+
+      // ✅ REDUCE STOCK if quantiteLivree > 0
+      if (quantiteLivree > 0) {
+        article.qte -= quantiteLivree;
+        article.qte_physique -= quantiteLivree;
+        await articleRepo.save(article);
+      }
+
+      totalQuantite += quantite;
+      totalLivree += quantiteLivree;
+
+      const bonArticle = {
+        article,
+        quantite: quantite,
+        quantiteLivree: quantiteLivree, // ✅ Store the initial delivered quantity
+        prixUnitaire,
+        prix_ttc: prixUnitaire * (1 + tvaRate / 100),
+        tva: tvaRate,
+        remise: item.remise ? parseFloat(item.remise) : null,
+      };
+
+      bonCommande.articles.push(bonArticle);
+    }
+
+    // Update BC status based on delivery
+    if (totalLivree === totalQuantite && totalQuantite > 0) {
+      bonCommande.status = "Livre";
+    } else if (totalLivree > 0 && totalLivree < totalQuantite) {
+      bonCommande.status = "Partiellement Livre";
+    }
+
+    const result = await bonRepo.save(bonCommande);
+    await queryRunner.commitTransaction();
+
+    res.status(201).json({
+      message: "Bon de commande client créé avec succès" + (totalLivree > 0 ? " et stock mis à jour" : ""),
+      data: result,
+    });
+  } catch (err) {
+    await queryRunner.rollbackTransaction();
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
+  }
+};
+
 exports.updateBonCommandeClient = async (req, res) => {
   try {
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
