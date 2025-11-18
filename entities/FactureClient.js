@@ -9,6 +9,11 @@ const FactureClient = new EntitySchema({
     dateFacture: { type: "timestamp" },
     dateEcheance: { type: "date", nullable: true },
     timbreFiscal: { type: "boolean", default: false }, // Add timbreFiscal field
+    exoneration: {
+      type: "boolean",
+      default: false,
+      nullable: true ,
+    },
     conditionPaiement: { type: "varchar", nullable: true }, // Add conditionPaiement field
     status: {
       type: "enum",

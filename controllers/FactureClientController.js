@@ -72,6 +72,7 @@ exports.createFactureClient = async (req, res) => {
       timbreFiscal,
       remiseType,
       montantPaye,
+      exoneration,
     } = req.body;
 
     const clientRepo = AppDataSource.getRepository(Client);
@@ -136,7 +137,8 @@ exports.createFactureClient = async (req, res) => {
       vendeur,
       bonLivraison,
       modeReglement,
-      timbreFiscal: !!timbreFiscal, // Save timbreFiscal as boolean
+      timbreFiscal: !!timbreFiscal,
+      exoneration: !!exoneration,  // Save timbreFiscal as boolean
       conditionPaiement: conditionPaiement || null,
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
@@ -218,6 +220,8 @@ exports.updateFactureClient = async (req, res) => {
       totalTVA,
       client_id,
       vendeur_id,
+      exoneration,
+      timbreFiscal,
       articles,
     } = req.body;
 
@@ -246,6 +250,7 @@ exports.updateFactureClient = async (req, res) => {
     facture.remise = remise;
     facture.remiseType = remiseType;
     facture.status = status;
+    facture.exoneration = !!exoneration;
     facture.taxMode = taxMode;
     facture.totalHT = totalHT;
     facture.totalTTC = totalTTC;

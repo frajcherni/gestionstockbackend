@@ -42,56 +42,56 @@ exports.register = async (req, res) => {
 };
 
 exports.login = async (req, res) => {
-    try {
-      const { username, password } = req.body;
-      console.log(username, password);
-  
-      const user = await userRepo.findOneBy({ username });
-      if (!user) return res.status(404).json({ message: "User not found" });
-  
-      // Direct password check without bcrypt
-      if (user.password !== password) {
-        return res.status(401).json({ message: "Invalid password" });
-      }
-  
-      const token = jwt.sign(
-        { id: user.id, username: user.username, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: "8h" }
-      );
-  
-      // Return user object with token and full_name
-      const userResponse = {
-        id: user.id,
-        username: user.username,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        full_name: `${user.first_name} ${user.last_name}`,
-        role: user.role,
-        is_active: user.is_active,
-        company_name: user.company_name,
-        company_address: user.company_address,
-        company_city: user.company_city,
-        company_phone: user.company_phone,
-        company_gsm: user.company_gsm, // Added GSM field
-        company_email: user.company_email,
-        company_website: user.company_website,
-        company_tax_id: user.company_tax_id,
-        company_matricule_fiscal: user.company_matricule_fiscal,
-        company_logo: user.company_logo,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-        token,
-      };
-  
-      res.json({ user: userResponse });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: "Server error", error: err.message });
-    }
-  };
+  try {
+    const { username, password } = req.body;
+    console.log(username, password);
 
-const uploadsDir = path.join(__dirname, '../uploads');
+    const user = await userRepo.findOneBy({ username });
+    if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Direct password check without bcrypt
+    if (user.password !== password) {
+      return res.status(401).json({ message: "Invalid password" });
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "8h" }
+    );
+
+    // Return user object with token and full_name
+    const userResponse = {
+      id: user.id,
+      username: user.username,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      full_name: `${user.first_name} ${user.last_name}`,
+      role: user.role,
+      is_active: user.is_active,
+      company_name: user.company_name,
+      company_address: user.company_address,
+      company_city: user.company_city,
+      company_phone: user.company_phone,
+      company_gsm: user.company_gsm, // Added GSM field
+      company_email: user.company_email,
+      company_website: user.company_website,
+      company_tax_id: user.company_tax_id,
+      company_matricule_fiscal: user.company_matricule_fiscal,
+      company_logo: user.company_logo,
+      created_at: user.created_at,
+      updated_at: user.updated_at,
+      token,
+    };
+
+    res.json({ user: userResponse });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+
+const uploadsDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -102,8 +102,8 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
-    cb(null, Date.now() + '-' + file.originalname);
-  }
+    cb(null, Date.now() + "-" + file.originalname);
+  },
 });
 
 const upload = multer({ storage: storage });
@@ -122,16 +122,16 @@ exports.updateProfile = async (req, res) => {
       company_phone,
       company_gsm, // Added GSM field
       company_email,
-      company_website
+      company_website,
+      company_tax_id,
     } = req.body;
 
-    console.log(id)
+    console.log(id);
     const userId = parseInt(id);
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
 
-    
     const user = await userRepo.findOneBy({ id: userId });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -148,7 +148,7 @@ exports.updateProfile = async (req, res) => {
     user.company_gsm = company_gsm || user.company_gsm; // Added GSM field
     user.company_email = company_email || user.company_email;
     user.company_website = company_website || user.company_website;
-    
+    user.company_tax_id = company_tax_id || user.company_tax_id;
     // Handle image upload
     if (req.file) {
       user.company_logo = req.file.filename;
@@ -173,13 +173,13 @@ exports.updateProfile = async (req, res) => {
       company_email: user.company_email,
       company_website: user.company_website,
       company_logo: user.company_logo,
+      company_tax_id: user.company_tax_id,
     };
 
     res.json({
       message: "Profile updated successfully",
-      user: updatedUser
+      user: updatedUser,
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error", error: err.message });

@@ -19,13 +19,24 @@ const VenteComptoire = new EntitySchema({
         },
         remise: { type: "decimal", precision: 10, scale: 3, default: 0 },
         totalAfterRemise: { type: "decimal", precision: 12, scale: 3, default: 0 },
-
         remiseType: {
             type: "enum",
             enum: ["percentage", "fixed"],
             default: "percentage"
         },
         notes: { type: "text", nullable: true },
+        // ✅ ADD PAYMENT FIELDS
+        paymentMethods: { 
+            type: "json", 
+            nullable: true 
+        },
+        totalPaymentAmount: { 
+            type: "decimal", 
+            precision: 12, 
+            scale: 3, 
+            default: 0 
+        },
+        espaceNotes: { type: "text", nullable: true },
         createdAt: { type: "timestamp", createDate: true },
         updatedAt: { type: "timestamp", updateDate: true }
     },
@@ -60,7 +71,6 @@ const VenteComptoireArticle = new EntitySchema({
         quantite: { type: "int" },
         prixUnitaire: { type: "decimal", precision: 10, scale: 3 },
         prix_ttc: { type: "decimal", precision: 10, scale: 3 , nullable : true },
-
         tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
         remise: { type: "decimal", precision: 5, scale: 3, nullable: true, default: null }
     },

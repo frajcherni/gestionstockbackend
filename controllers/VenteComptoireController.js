@@ -19,6 +19,10 @@ exports.createVenteComptoire = async (req, res) => {
       vendeur_id,
       articles,
       taxMode,
+      // ✅ ADD PAYMENT FIELDS
+      paymentMethods,
+      totalPaymentAmount,
+      espaceNotes,
     } = req.body;
 
     const clientRepo = AppDataSource.getRepository(Client);
@@ -52,6 +56,10 @@ exports.createVenteComptoire = async (req, res) => {
       client,
       vendeur,
       taxMode,
+      // ✅ ADD PAYMENT DATA
+      paymentMethods: paymentMethods || [],
+      totalPaymentAmount: parseFloat(totalPaymentAmount) || 0,
+      espaceNotes: espaceNotes || null,
       articles: [],
     };
 
@@ -165,6 +173,14 @@ exports.updateVenteComptoire = async (req, res) => {
     if (req.body.remiseType) updates.remiseType = req.body.remiseType;
     if (req.body.notes !== undefined) updates.notes = req.body.notes;
     if (req.body.taxMode) updates.taxMode = req.body.taxMode;
+    
+    // ✅ ADD PAYMENT UPDATES
+    if (req.body.paymentMethods !== undefined) 
+      updates.paymentMethods = req.body.paymentMethods;
+    if (req.body.totalPaymentAmount !== undefined) 
+      updates.totalPaymentAmount = parseFloat(req.body.totalPaymentAmount);
+    if (req.body.espaceNotes !== undefined) 
+      updates.espaceNotes = req.body.espaceNotes;
     
     // CALCULATE AND SAVE totalAfterRemise IN UPDATE
     if (req.body.remise !== undefined || req.body.remiseType || req.body.articles) {
