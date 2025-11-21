@@ -9,7 +9,7 @@ const DevisClient = new EntitySchema({
         dateCommande: { type: "timestamp" },
         status: {
             type: "enum",
-            enum: ["Brouillon", "Envoye", "Accepte", "Refuse", "Expire"],
+            enum: ["Confirme", "Envoye", "Accepte", "Refuse", "Expire" , "Brouillon"],
             default: "Brouillon"
         },
         taxMode: {

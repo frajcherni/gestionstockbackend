@@ -3,8 +3,14 @@ const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
 const { ClientWebsite } = require("../entities/ClientWebsite");
 const { Vendeur } = require("../entities/Vendeur");
-const { BonCommandeClient, BonCommandeClientArticle } = require("../entities/BonCommandeClient");
-const { BonLivraison, BonLivraisonArticle } = require("../entities/BonLivraison");
+const {
+  BonCommandeClient,
+  BonCommandeClientArticle,
+} = require("../entities/BonCommandeClient");
+const {
+  BonLivraison,
+  BonLivraisonArticle,
+} = require("../entities/BonLivraison");
 
 exports.createBonCommandeClient = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -26,7 +32,11 @@ exports.createBonCommandeClient = async (req, res) => {
       totalHT,
       totalTVA,
       clientWebsiteInfo,
+      paymentMethods,
+      totalPaymentAmount,
+      espaceNotes
     } = req.body;
+    
 
     const clientRepo = queryRunner.manager.getRepository(Client);
     const clientWebsiteRepo = queryRunner.manager.getRepository(ClientWebsite);
@@ -37,7 +47,9 @@ exports.createBonCommandeClient = async (req, res) => {
     // Validate required fields
     if (!numeroCommande || !dateCommande) {
       await queryRunner.rollbackTransaction();
-      return res.status(400).json({ message: "Les champs obligatoires sont manquants" });
+      return res
+        .status(400)
+        .json({ message: "Les champs obligatoires sont manquants" });
     }
 
     let client = null;
@@ -52,9 +64,18 @@ exports.createBonCommandeClient = async (req, res) => {
         return res.status(404).json({ message: "Client non trouvé" });
       }
     } else if (clientWebsiteInfo) {
-      if (!clientWebsiteInfo.nomPrenom || !clientWebsiteInfo.telephone || !clientWebsiteInfo.adresse) {
+      if (
+        !clientWebsiteInfo.nomPrenom ||
+        !clientWebsiteInfo.telephone ||
+        !clientWebsiteInfo.adresse
+      ) {
         await queryRunner.rollbackTransaction();
-        return res.status(400).json({ message: "Nom, téléphone et adresse sont obligatoires pour les clients du site web" });
+        return res
+          .status(400)
+          .json({
+            message:
+              "Nom, téléphone et adresse sont obligatoires pour les clients du site web",
+          });
       }
       clientWebsite = clientWebsiteRepo.create(clientWebsiteInfo);
       clientWebsite = await clientWebsiteRepo.save(clientWebsite);
@@ -75,6 +96,10 @@ exports.createBonCommandeClient = async (req, res) => {
     let totalQuantite = 0;
     let totalLivree = 0;
 
+    const hasPayments = paymentMethods && paymentMethods.length > 0;
+const montantPaye = hasPayments ? parseFloat(totalPaymentAmount || 0) : 0;
+const resteAPayer = parseFloat(totalTTC || 0) - montantPaye;
+
     const bonCommande = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
@@ -89,15 +114,25 @@ exports.createBonCommandeClient = async (req, res) => {
       totalTTC: parseFloat(totalTTC || 0),
       vendeur,
       taxMode,
+      paymentMethods: hasPayments ? paymentMethods : null,
+      totalPaymentAmount: montantPaye,
+      montantPaye: montantPaye,
+      resteAPayer: resteAPayer,
+      hasPayments: hasPayments,
+      espaceNotes: espaceNotes || null,
       articles: [],
     };
 
     // Process articles - REDUCE STOCK if quantiteLivree > 0
     for (const item of articles) {
-      const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
+      const article = await articleRepo.findOneBy({
+        id: parseInt(item.article_id),
+      });
       if (!article) {
         await queryRunner.rollbackTransaction();
-        return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouvé` });
+        return res
+          .status(404)
+          .json({ message: `Article avec ID ${item.article_id} non trouvé` });
       }
 
       let prixUnitaire = parseFloat(item.prix_unitaire);
@@ -109,7 +144,9 @@ exports.createBonCommandeClient = async (req, res) => {
 
       if (!item.quantite || !item.prix_unitaire) {
         await queryRunner.rollbackTransaction();
-        return res.status(400).json({ message: "Quantité et prix unitaire sont obligatoires" });
+        return res
+          .status(400)
+          .json({ message: "Quantité et prix unitaire sont obligatoires" });
       }
 
       const quantiteLivree = parseInt(item.quantiteLivree) || 0;
@@ -119,11 +156,9 @@ exports.createBonCommandeClient = async (req, res) => {
       if (quantiteLivree > quantite) {
         await queryRunner.rollbackTransaction();
         return res.status(400).json({
-          message: `La quantité livrée (${quantiteLivree}) ne peut pas dépasser la quantité commandée (${quantite})`
+          message: `La quantité livrée (${quantiteLivree}) ne peut pas dépasser la quantité commandée (${quantite})`,
         });
       }
-
-    
 
       // ✅ REDUCE STOCK if quantiteLivree > 0
       if (quantiteLivree > 0) {
@@ -159,173 +194,9 @@ exports.createBonCommandeClient = async (req, res) => {
     await queryRunner.commitTransaction();
 
     res.status(201).json({
-      message: "Bon de commande client créé avec succès" + (totalLivree > 0 ? " et stock mis à jour" : ""),
-      data: result,
-    });
-  } catch (err) {
-    await queryRunner.rollbackTransaction();
-    console.error(err);
-    res.status(500).json({ message: "Erreur serveur", error: err.message });
-  } finally {
-    await queryRunner.release();
-  }
-};
-
-
-exports.hhh = async (req, res) => {
-  const queryRunner = AppDataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    const {
-      numeroCommande,
-      dateCommande,
-      remise,
-      remiseType,
-      notes,
-      client_id,
-      vendeur_id,
-      articles,
-      taxMode,
-      totalTTC,
-      totalHT,
-      totalTVA,
-      clientWebsiteInfo,
-    } = req.body;
-
-    const clientRepo = queryRunner.manager.getRepository(Client);
-    const clientWebsiteRepo = queryRunner.manager.getRepository(ClientWebsite);
-    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
-    const articleRepo = queryRunner.manager.getRepository(Article);
-    const bonRepo = queryRunner.manager.getRepository(BonCommandeClient);
-
-    // Validate required fields
-    if (!numeroCommande || !dateCommande) {
-      await queryRunner.rollbackTransaction();
-      return res.status(400).json({ message: "Les champs obligatoires sont manquants" });
-    }
-
-    let client = null;
-    let clientWebsite = null;
-    let vendeur = null;
-
-    // Handle Client
-    if (client_id) {
-      client = await clientRepo.findOneBy({ id: parseInt(client_id) });
-      if (!client) {
-        await queryRunner.rollbackTransaction();
-        return res.status(404).json({ message: "Client non trouvé" });
-      }
-    } else if (clientWebsiteInfo) {
-      if (!clientWebsiteInfo.nomPrenom || !clientWebsiteInfo.telephone || !clientWebsiteInfo.adresse) {
-        await queryRunner.rollbackTransaction();
-        return res.status(400).json({ message: "Nom, téléphone et adresse sont obligatoires pour les clients du site web" });
-      }
-      clientWebsite = clientWebsiteRepo.create(clientWebsiteInfo);
-      clientWebsite = await clientWebsiteRepo.save(clientWebsite);
-    } else {
-      await queryRunner.rollbackTransaction();
-      return res.status(400).json({ message: "Informations client requises" });
-    }
-
-    if (vendeur_id) {
-      vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
-    }
-
-    if (!articles || !Array.isArray(articles) || articles.length === 0) {
-      await queryRunner.rollbackTransaction();
-      return res.status(400).json({ message: "Les articles sont requis" });
-    }
-
-    let totalQuantite = 0;
-    let totalLivree = 0;
-
-    const bonCommande = {
-      numeroCommande,
-      dateCommande: new Date(dateCommande),
-      status: "Confirme",
-      remise: remise || 0,
-      remiseType: remiseType,
-      notes: notes || null,
-      client,
-      clientWebsite,
-      totalHT: parseFloat(totalHT || 0),
-      totalTVA: parseFloat(totalTVA || 0),
-      totalTTC: parseFloat(totalTTC || 0),
-      vendeur,
-      taxMode,
-      articles: [],
-    };
-
-    // Process articles - REDUCE STOCK if quantiteLivree > 0
-    for (const item of articles) {
-      const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
-      if (!article) {
-        await queryRunner.rollbackTransaction();
-        return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouvé` });
-      }
-
-      let prixUnitaire = parseFloat(item.prix_unitaire);
-      const tvaRate = item.tva || 0;
-
-      if (taxMode === "TTC") {
-        prixUnitaire = prixUnitaire / (1 + tvaRate / 100);
-      }
-
-      if (!item.quantite || !item.prix_unitaire) {
-        await queryRunner.rollbackTransaction();
-        return res.status(400).json({ message: "Quantité et prix unitaire sont obligatoires" });
-      }
-
-      const quantiteLivree = parseInt(item.quantiteLivree) || 0;
-      const quantite = parseInt(item.quantite);
-
-      // Validate that delivered quantity doesn't exceed ordered quantity
-      if (quantiteLivree > quantite) {
-        await queryRunner.rollbackTransaction();
-        return res.status(400).json({
-          message: `La quantité livrée (${quantiteLivree}) ne peut pas dépasser la quantité commandée (${quantite})`
-        });
-      }
-
-    
-
-      // ✅ REDUCE STOCK if quantiteLivree > 0
-      if (quantiteLivree > 0) {
-        article.qte -= quantiteLivree;
-        article.qte_physique -= quantiteLivree;
-        await articleRepo.save(article);
-      }
-
-      totalQuantite += quantite;
-      totalLivree += quantiteLivree;
-
-      const bonArticle = {
-        article,
-        quantite: quantite,
-        quantiteLivree: quantiteLivree, // ✅ Store the initial delivered quantity
-        prixUnitaire,
-        prix_ttc: prixUnitaire * (1 + tvaRate / 100),
-        tva: tvaRate,
-        remise: item.remise ? parseFloat(item.remise) : null,
-      };
-
-      bonCommande.articles.push(bonArticle);
-    }
-
-    // Update BC status based on delivery
-    if (totalLivree === totalQuantite && totalQuantite > 0) {
-      bonCommande.status = "Livre";
-    } else if (totalLivree > 0 && totalLivree < totalQuantite) {
-      bonCommande.status = "Partiellement Livre";
-    }
-
-    const result = await bonRepo.save(bonCommande);
-    await queryRunner.commitTransaction();
-
-    res.status(201).json({
-      message: "Bon de commande client créé avec succès" + (totalLivree > 0 ? " et stock mis à jour" : ""),
+      message:
+        "Bon de commande client créé avec succès" +
+        (totalLivree > 0 ? " et stock mis à jour" : ""),
       data: result,
     });
   } catch (err) {
@@ -341,7 +212,9 @@ exports.updateBonCommandeClient = async (req, res) => {
   try {
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
     const articleRepo = AppDataSource.getRepository(Article);
-    const bonArticleRepo = AppDataSource.getRepository(BonCommandeClientArticle);
+    const bonArticleRepo = AppDataSource.getRepository(
+      BonCommandeClientArticle
+    );
     const clientRepo = AppDataSource.getRepository(Client);
     const vendeurRepo = AppDataSource.getRepository(Vendeur);
     const bonLivRepo = AppDataSource.getRepository(BonLivraison);
@@ -353,17 +226,20 @@ exports.updateBonCommandeClient = async (req, res) => {
     });
 
     if (!bon) {
-      return res.status(404).json({ message: "Bon de commande client non trouvé" });
+      return res
+        .status(404)
+        .json({ message: "Bon de commande client non trouvé" });
     }
 
     // ✅ RULE: Check if linked to BL, prevent article modifications
     const linkedBLs = await bonLivRepo.find({
-      where: { bonCommandeClient: { id: bon.id } }
+      where: { bonCommandeClient: { id: bon.id } },
     });
 
     if (linkedBLs.length > 0) {
       return res.status(400).json({
-        message: "Impossible de modifier ce bon de commande car il est lié à des bons de livraison"
+        message:
+          "Impossible de modifier ce bon de commande car il est lié à des bons de livraison",
       });
     }
 
@@ -377,10 +253,10 @@ exports.updateBonCommandeClient = async (req, res) => {
       for (const item of req.body.articles) {
         const quantite = parseInt(item.quantite) || 0;
         const quantiteLivree = parseInt(item.quantiteLivree) || 0;
-        
+
         totalQuantite += quantite;
         totalLivree += quantiteLivree;
-        
+
         if (quantiteLivree > 0) {
           hasAnyDelivery = true;
         }
@@ -388,7 +264,7 @@ exports.updateBonCommandeClient = async (req, res) => {
         // Validate that delivered quantity doesn't exceed ordered quantity
         if (quantiteLivree > quantite) {
           return res.status(400).json({
-            message: `La quantité livrée (${quantiteLivree}) ne peut pas dépasser la quantité commandée (${quantite})`
+            message: `La quantité livrée (${quantiteLivree}) ne peut pas dépasser la quantité commandée (${quantite})`,
           });
         }
       }
@@ -452,7 +328,9 @@ exports.updateBonCommandeClient = async (req, res) => {
         if (!existsInNew) {
           // ✅ Restore stock for delivered qty
           if (oldItem.quantiteLivree > 0) {
-            const article = await articleRepo.findOneBy({ id: oldItem.article.id });
+            const article = await articleRepo.findOneBy({
+              id: oldItem.article.id,
+            });
             article.qte += oldItem.quantiteLivree;
             article.qte_physique += oldItem.quantiteLivree;
             await articleRepo.save(article);
@@ -467,7 +345,9 @@ exports.updateBonCommandeClient = async (req, res) => {
           id: parseInt(item.article_id),
         });
         if (!article) {
-          return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouvé` });
+          return res
+            .status(404)
+            .json({ message: `Article avec ID ${item.article_id} non trouvé` });
         }
 
         let prixUnitaire = parseFloat(item.prix_unitaire);
@@ -568,12 +448,13 @@ exports.deleteBonCommandeClient = async (req, res) => {
 
     // ✅ RULE: Check if linked to BL, prevent deletion
     const linkedBLs = await bonLivRepo.find({
-      where: { bonCommandeClient: { id: bon.id } }
+      where: { bonCommandeClient: { id: bon.id } },
     });
 
     if (linkedBLs.length > 0) {
       return res.status(400).json({
-        message: "Impossible de supprimer un bon de commande lié à des bons de livraison."
+        message:
+          "Impossible de supprimer un bon de commande lié à des bons de livraison.",
       });
     }
 
@@ -597,7 +478,10 @@ exports.deleteBonCommandeClient = async (req, res) => {
 
     res
       .status(200)
-      .json({ message: "Bon de commande client supprimé avec succès et stock restauré si applicable" });
+      .json({
+        message:
+          "Bon de commande client supprimé avec succès et stock restauré si applicable",
+      });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
@@ -643,7 +527,9 @@ exports.getNextCommandeNumber = async (req, res) => {
     // Get last BonCommande for this year
     const lastBon = await bonRepo
       .createQueryBuilder("bon")
-      .where("bon.numeroCommande LIKE :pattern", { pattern: `${prefix}%/${year}` })
+      .where("bon.numeroCommande LIKE :pattern", {
+        pattern: `${prefix}%/${year}`,
+      })
       .orderBy("bon.createdAt", "DESC")
       .getOne();
 
@@ -651,7 +537,9 @@ exports.getNextCommandeNumber = async (req, res) => {
     if (!lastBon || !lastBon.numeroCommande) {
       nextNumber = 1; // Start from COMMANDE001/year
     } else {
-      const match = lastBon.numeroCommande.match(new RegExp(`^${prefix}(\\d{3})/${year}$`));
+      const match = lastBon.numeroCommande.match(
+        new RegExp(`^${prefix}(\\d{3})/${year}$`)
+      );
       nextNumber = match ? parseInt(match[1], 10) + 1 : 1;
     }
 
@@ -659,10 +547,15 @@ exports.getNextCommandeNumber = async (req, res) => {
 
     while (true) {
       // Format next number (e.g., BC005/2025)
-      nextCommandeNumber = `${prefix}${String(nextNumber).padStart(3, "0")}/${year}`;
+      nextCommandeNumber = `${prefix}${String(nextNumber).padStart(
+        3,
+        "0"
+      )}/${year}`;
 
       // Check if it already exists
-      const existing = await bonRepo.findOne({ where: { numeroCommande: nextCommandeNumber } });
+      const existing = await bonRepo.findOne({
+        where: { numeroCommande: nextCommandeNumber },
+      });
 
       if (!existing) break; // unique number found → exit loop
       nextNumber++; // otherwise, increment and try next one
@@ -677,7 +570,6 @@ exports.getNextCommandeNumber = async (req, res) => {
     });
   }
 };
-
 
 exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
   try {
@@ -719,6 +611,10 @@ exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
     if (!vendeur)
       return res.status(404).json({ message: "Vendeur non trouv�" });
 
+      const hasPayments = req.body.paymentMethods && req.body.paymentMethods.length > 0;
+const montantPaye = hasPayments ? parseFloat(req.body.totalPaymentAmount || 0) : 0;
+const resteAPayer = parseFloat(req.body.totalTTC || 0) - montantPaye;
+
     const bonCommande = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
@@ -729,6 +625,12 @@ exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
       client,
       vendeur,
       taxMode,
+      paymentMethods: hasPayments ? req.body.paymentMethods : null,
+      totalPaymentAmount: montantPaye,
+      montantPaye: montantPaye,
+      resteAPayer: resteAPayer,
+      hasPayments: hasPayments,
+      espaceNotes: req.body.espaceNotes || null,
       articles: [],
     };
 
@@ -780,8 +682,13 @@ exports.getAllBonCommandeClient = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(BonCommandeClient);
     const list = await repo.find({
-      relations: ["client", "vendeur", "articles", "articles.article" , "clientWebsite", 
-    ],
+      relations: [
+        "client",
+        "vendeur",
+        "articles",
+        "articles.article",
+        "clientWebsite",
+      ],
     });
     res.json(list);
   } catch (err) {

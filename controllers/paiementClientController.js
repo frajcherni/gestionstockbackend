@@ -3,6 +3,8 @@ const { PaiementClient } = require("../entities/PaiementClient");
 const { BonCommandeClient } = require("../entities/BonCommandeClient");
 const { Client } = require("../entities/Client");
 
+
+
 exports.createPaiement = async (req, res) => {
   try {
     let {
@@ -35,7 +37,7 @@ exports.createPaiement = async (req, res) => {
     montant = montant && !isNaN(Number(montant)) ? Number(montant) : 0;
 
     // Validate modePaiement
-    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre"];
+    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Retention", "Autre"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
     }
@@ -140,13 +142,9 @@ exports.getPaiementsByBonCommande = async (req, res) => {
     res.json(paiements);
   } catch (err) {
     console.error("Erreur lors de la récupération des paiements:", err);
-    res
-      .status(500)
-      .json({ error: "Erreur lors de la récupération des paiements" });
+    res.status(500).json({ error: "Erreur lors de la récupération des paiements" });
   }
 };
-
-
 
 exports.deletePaiement = async (req, res) => {
   try {
@@ -187,9 +185,7 @@ exports.deletePaiement = async (req, res) => {
     res.json({ message: "Paiement supprimé avec succès" });
   } catch (err) {
     console.error("Erreur lors de la suppression du paiement:", err);
-    res
-      .status(500)
-      .json({ error: "Erreur lors de la suppression du paiement" });
+    res.status(500).json({ error: "Erreur lors de la suppression du paiement" });
   }
 };
 
@@ -226,7 +222,7 @@ exports.updatePaiement = async (req, res) => {
     montant = montant && !isNaN(Number(montant)) ? Number(montant) : 0;
 
     // Validate modePaiement
-    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre"];
+    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Retention", "Autre"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
     }
@@ -342,9 +338,7 @@ exports.getAllPaiements = async (req, res) => {
     res.json(paiements);
   } catch (err) {
     console.error("Erreur lors de la récupération des paiements:", err);
-    res
-      .status(500)
-      .json({ error: "Erreur lors de la récupération des paiements" });
+    res.status(500).json({ error: "Erreur lors de la récupération des paiements" });
   }
 };
 
@@ -376,10 +370,7 @@ exports.getNextPaiementNumber = async (req, res) => {
       .padStart(5, "0")}/${year}`;
     res.json({ numeroPaiement: nextPaiementNumber });
   } catch (err) {
-    console.error(
-      "Erreur lors de la génération du numéro de paiement:",
-      err
-    );
+    console.error("Erreur lors de la génération du numéro de paiement:", err);
     res.status(500).json({
       message: "Erreur lors de la génération du numéro de paiement",
       error: err.message,

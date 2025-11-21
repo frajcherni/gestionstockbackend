@@ -8,7 +8,7 @@ const PaiementClient = new EntitySchema({
     montant: { type: "decimal", precision: 12, scale: 3 },
     modePaiement: {
       type: "enum",
-      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre"],
+      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre" , "Retention"],
     },
     numeroPaiement: { type: "varchar", length: 100, nullable: true },
     date: { type: "date" },

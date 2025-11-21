@@ -146,9 +146,7 @@ exports.createDevisClient = async (req, res) => {
       !numeroCommande ||
       !client_id ||
       !vendeur_id ||
-      !dateCommande ||
-      !status
-    ) {
+      !dateCommande    ) {
       return res
         .status(400)
         .json({ message: "Les champs obligatoires sont manquants" });
@@ -164,7 +162,7 @@ exports.createDevisClient = async (req, res) => {
     const devis = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
-      status,
+      status : "Confirme",
       remise: remise || 0,
       remiseType: remiseType || "percentage",
       notes: notes || null,

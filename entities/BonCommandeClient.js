@@ -16,10 +16,22 @@ const BonCommandeClient = new EntitySchema({
         totalTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
         totalTTCAfterRemise: { type: "decimal", precision: 12, scale: 3, default: 0 },
 
-        // In your BonCommandeClient entity, add these columns:
-montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
-resteAPayer: { type: "decimal", precision: 12, scale: 3, default: 0 },
-hasPayments: { type: "boolean", default: false },
+        resteAPayer: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        
+           // Champs de paiement
+           montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
+        
+           hasPayments: { type: "boolean", default: false },
+           totalPaymentAmount: { type: "decimal", precision: 12, scale: 3, default: 0 },
+           espaceNotes: { type: "text", nullable: true },
+           
+           // Stocker les méthodes de paiement en JSON
+           paymentMethods: { 
+               type: "json", 
+               nullable: true,
+               default: null
+           },
+
         taxMode: {
             type: "enum",
             enum: ["HT", "TTC"],

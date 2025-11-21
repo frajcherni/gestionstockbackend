@@ -39,6 +39,22 @@ const FactureClient = new EntitySchema({
       default: 0,
       nullable: true,
     },
+    paymentMethods: { 
+      type: "json", 
+      nullable: true,
+      default: null
+    },
+    totalPaymentAmount: { 
+      type: "decimal", 
+      precision: 12, 
+      scale: 3, 
+      default: 0,
+      nullable: true 
+    },
+    espaceNotes: { 
+      type: "text", 
+      nullable: true 
+    },
     remiseType: {
       type: "enum",
       enum: ["percentage", "fixed"],

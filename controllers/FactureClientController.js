@@ -73,6 +73,10 @@ exports.createFactureClient = async (req, res) => {
       remiseType,
       montantPaye,
       exoneration,
+      // NEW PAYMENT METHODS FIELDS
+      paymentMethods = [],
+      totalPaymentAmount = 0,
+      espaceNotes = "",
     } = req.body;
 
     const clientRepo = AppDataSource.getRepository(Client);
@@ -86,8 +90,6 @@ exports.createFactureClient = async (req, res) => {
       !numeroFacture ||
       !dateFacture ||
       !client_id 
-      // !modeReglement ||
-     
     ) {
       return res
         .status(400)
@@ -138,7 +140,7 @@ exports.createFactureClient = async (req, res) => {
       bonLivraison,
       modeReglement,
       timbreFiscal: !!timbreFiscal,
-      exoneration: !!exoneration,  // Save timbreFiscal as boolean
+      exoneration: !!exoneration,
       conditionPaiement: conditionPaiement || null,
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
@@ -148,6 +150,10 @@ exports.createFactureClient = async (req, res) => {
       remiseType: remiseType || "percentage",
       montantPaye: parseFloat(montantPaye || 0),
       resteAPayer: parseFloat(totalTTC || 0) - parseFloat(montantPaye || 0),
+      // NEW PAYMENT METHODS FIELDS
+      paymentMethods: paymentMethods, // Store as JSON
+      totalPaymentAmount: parseFloat(totalPaymentAmount || 0),
+      espaceNotes: espaceNotes || null,
       articles: [],
     };
 
@@ -178,17 +184,16 @@ exports.createFactureClient = async (req, res) => {
       const tvaRate = item.tva ? parseFloat(item.tva) : 0;
       
       // Calculate prix_ttc based on prix_unitaire and TVA
-    // ✅ FIX: Use prix_ttc sent from frontend instead of calculating it
-const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
+      const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
 
-const factureArticle = {
-  article: articleEntity,
-  quantite: parseInt(item.quantite),
-  prixUnitaire: prixUnitaire,
-  prix_ttc: +prix_ttc.toFixed(3), // Use the TTC value from frontend
-  tva: tvaRate,
-  remise: item.remise ? parseFloat(item.remise) : 0,
-};
+      const factureArticle = {
+        article: articleEntity,
+        quantite: parseInt(item.quantite),
+        prixUnitaire: prixUnitaire,
+        prix_ttc: +prix_ttc.toFixed(3),
+        tva: tvaRate,
+        remise: item.remise ? parseFloat(item.remise) : 0,
+      };
       facture.articles.push(factureArticle);
     }
 
