@@ -23,6 +23,9 @@ const TresorieRoutes =  require("./routes/TresorieRoutes");
 const paiementClientRoutes = require("./routes/paiementClientRoutes");
 
 // Use the routes
+// Use the routes
+// Use the routes
+
 
 const app = express();
 app.use('/uploads', express.static('uploads'));
