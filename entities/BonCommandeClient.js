@@ -25,6 +25,9 @@ const BonCommandeClient = new EntitySchema({
            totalPaymentAmount: { type: "decimal", precision: 12, scale: 3, default: 0 },
            espaceNotes: { type: "text", nullable: true },
            
+           hasRetenue: { type: "boolean", default: false },
+           montantRetenue: { type: "decimal", precision: 12, scale: 3, default: 0 },
+           
            // Stocker les méthodes de paiement en JSON
            paymentMethods: { 
                type: "json", 

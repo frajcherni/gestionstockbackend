@@ -19,6 +19,10 @@ const BonLivraison = new EntitySchema({
             default: "percentage"
         },
         notes: { type: "text", nullable: true },
+        voiture: { type: "varchar", nullable: true },
+        serie: { type: "varchar", nullable: true },
+        chauffeur: { type: "varchar", nullable: true },
+        cin: { type: "varchar", nullable: true },
         taxMode: {
             type: "enum",
             enum: ["HT", "TTC"],

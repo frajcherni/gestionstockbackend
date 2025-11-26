@@ -28,6 +28,10 @@ exports.createBonLivraison = async (req, res) => {
       bonCommandeClient_id,
       articles,
       taxMode,
+      voiture,
+      serie,
+      chauffeur,
+      cin
     } = req.body;
 
     const clientRepo = queryRunner.manager.getRepository(Client);
@@ -217,6 +221,10 @@ exports.createBonLivraison = async (req, res) => {
       vendeur,
       taxMode,
       bonCommandeClient: bonCommandeClient_id ? bonCommandeClient : null,
+      voiture: voiture || null,
+      serie: serie || null,
+      chauffeur: chauffeur || null,
+      cin: cin || null,
       articles: finalArticles,
     };
 
@@ -245,14 +253,10 @@ exports.updateBonLivraison = async (req, res) => {
 
   try {
     const bonRepo = queryRunner.manager.getRepository(BonLivraison);
-    const bonArticleRepo =
-      queryRunner.manager.getRepository(BonLivraisonArticle);
+    const bonArticleRepo = queryRunner.manager.getRepository(BonLivraisonArticle);
     const articleRepo = queryRunner.manager.getRepository(Article);
-    const bonCmdClientRepo =
-      queryRunner.manager.getRepository(BonCommandeClient);
-    const bonCmdArticleRepo = queryRunner.manager.getRepository(
-      BonCommandeClientArticle
-    );
+    const bonCmdClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
+    const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
 
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
@@ -272,10 +276,21 @@ exports.updateBonLivraison = async (req, res) => {
       return res.status(404).json({ message: "Bon de livraison introuvable" });
     }
 
-    const { dateLivraison, remise, remiseType, notes, taxMode, articles } =
-      req.body;
+    // Extract all fields from req.body
+    const { 
+      dateLivraison, 
+      remise, 
+      remiseType, 
+      notes, 
+      taxMode, 
+      articles,
+      voiture,
+      serie, 
+      chauffeur, 
+      cin 
+    } = req.body;
 
-    // ✅ RULE: BL status is always "Livré" - remove from updateable fields
+    // Update basic information
     bon.dateLivraison = dateLivraison
       ? new Date(dateLivraison)
       : bon.dateLivraison;
@@ -284,8 +299,14 @@ exports.updateBonLivraison = async (req, res) => {
     bon.notes = notes || bon.notes;
     bon.taxMode = taxMode || bon.taxMode;
     bon.status = "Livré"; // Always set to "Livré"
+    
+    // Update delivery information
+    bon.voiture = voiture !== undefined ? voiture : bon.voiture;
+    bon.serie = serie !== undefined ? serie : bon.serie;
+    bon.chauffeur = chauffeur !== undefined ? chauffeur : bon.chauffeur;
+    bon.cin = cin !== undefined ? cin : bon.cin;
 
-    // ✅ Update articles
+    // Update articles
     if (articles && Array.isArray(articles)) {
       // --- Step 1: Restaurer les quantités livrées dans le bon de commande et stock ---
       if (bon.bonCommandeClient) {

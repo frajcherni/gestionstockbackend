@@ -66,6 +66,7 @@ exports.createFactureClient = async (req, res) => {
       totalHT,
       totalTVA,
       totalTTC,
+      totalTTCAfterRemise, // ADD THIS
       notes,
       remise,
       conditionPaiement,
@@ -77,6 +78,9 @@ exports.createFactureClient = async (req, res) => {
       paymentMethods = [],
       totalPaymentAmount = 0,
       espaceNotes = "",
+      // RETENTION FIELDS - ADD THESE
+      montantRetenue = 0,
+      hasRetenue = false,
     } = req.body;
 
     const clientRepo = AppDataSource.getRepository(Client);
@@ -129,6 +133,9 @@ exports.createFactureClient = async (req, res) => {
       }
     }
 
+    // Calculate net à payer (after retention)
+    const netAPayer = parseFloat(totalTTCAfterRemise || totalTTC || 0) - parseFloat(montantRetenue || 0);
+    
     const facture = {
       numeroFacture,
       dateFacture: new Date(dateFacture),
@@ -145,19 +152,28 @@ exports.createFactureClient = async (req, res) => {
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
       totalTTC: parseFloat(totalTTC || 0),
+      totalTTCAfterRemise: parseFloat(totalTTCAfterRemise || totalTTC || 0), // ADD THIS
       notes: notes || null,
       remise: parseFloat(remise || 0),
       remiseType: remiseType || "percentage",
       montantPaye: parseFloat(montantPaye || 0),
-      resteAPayer: parseFloat(totalTTC || 0) - parseFloat(montantPaye || 0),
+      resteAPayer: Math.max(0, netAPayer - parseFloat(montantPaye || 0)),
       // NEW PAYMENT METHODS FIELDS
       paymentMethods: paymentMethods, // Store as JSON
       totalPaymentAmount: parseFloat(totalPaymentAmount || 0),
       espaceNotes: espaceNotes || null,
+      // RETENTION FIELDS - ADD THESE
+      montantRetenue: parseFloat(montantRetenue || 0),
+      hasRetenue: !!hasRetenue,
       articles: [],
     };
 
-    console.log(facture);
+    console.log("Creating facture with retention:", {
+      montantRetenue: facture.montantRetenue,
+      hasRetenue: facture.hasRetenue,
+      paymentMethods: facture.paymentMethods,
+      totalPaymentAmount: facture.totalPaymentAmount
+    });
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
       return res.status(400).json({ message: "Les articles sont requis" });

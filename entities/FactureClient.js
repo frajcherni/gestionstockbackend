@@ -24,6 +24,8 @@ const FactureClient = new EntitySchema({
     totalHT: { type: "decimal", precision: 12, scale: 3, default: 0 },
     totalTVA: { type: "decimal", precision: 12, scale: 3, default: 0 },
     totalTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    totalTTCAfterRemise: { type: "decimal", precision: 12, scale: 3, default: 0 },
+
     notes: { type: "text", nullable: true },
     modeReglement: {
       type: "enum",
@@ -38,6 +40,16 @@ const FactureClient = new EntitySchema({
       scale: 3,
       default: 0,
       nullable: true,
+    },
+    montantRetenue: {
+      type: "decimal",
+      precision: 15,
+      scale: 3,
+      default: 0,
+    },
+    hasRetenue: {
+      type: "boolean",
+      default: false,
     },
     paymentMethods: { 
       type: "json", 

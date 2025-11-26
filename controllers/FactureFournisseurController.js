@@ -28,6 +28,9 @@ exports.createFactureFournisseur = async (req, res) => {
       totalTTC,
       timbreFiscal,
       conditionPaiement,
+      paymentMethods,
+      montantRetenue,
+      hasRetenue,
     } = req.body;
 
     const fournisseurRepo = AppDataSource.getRepository(Fournisseur);
@@ -74,8 +77,12 @@ exports.createFactureFournisseur = async (req, res) => {
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
       totalTTC: parseFloat(totalTTC || 0) ,// Include timbreFiscal in totalTTC
-      timbreFiscal: !!timbreFiscal, // Save timbreFiscal as boolean
+      timbreFiscal: !!timbreFiscal,
+      paymentMethods: processedPaymentMethods,
+      montantRetenue: retentionAmount,
+      hasRetenue: hasRetention,
       articles: [],
+      
     };
     console.log(facture)
 
@@ -102,12 +109,47 @@ exports.createFactureFournisseur = async (req, res) => {
           });
       }
 
+      let processedPaymentMethods = [];
+      let totalPaymentAmount = 0;
+      let hasRetention = false;
+      let retentionAmount = 0;
+  
+      if (paymentMethods && Array.isArray(paymentMethods)) {
+        processedPaymentMethods = paymentMethods.map((pm) => {
+          if (pm.method === "retenue") {
+            hasRetention = true;
+            retentionAmount = parseFloat(montantRetenue) || 0;
+            return {
+              method: pm.method,
+              amount: 0,
+              numero: pm.numero || "",
+              banque: pm.banque || "",
+              dateEcheance: pm.dateEcheance || "",
+              tauxRetention: pm.tauxRetention || 1
+            };
+          } else {
+            const amount = parseFloat(pm.amount) || 0;
+            totalPaymentAmount += amount;
+            return {
+              
+              method: pm.method,
+              amount: amount,
+              numero: pm.numero || "",
+              banque: pm.banque || "",
+              dateEcheance: pm.dateEcheance || "",
+            };
+          }
+        });
+      }
+
+      
       const factureArticle = {
         article: articleEntity,
         quantite: parseInt(item.quantite),
         prixUnitaire: parseFloat(item.prix_unitaire),
         tva: item.tva ? parseFloat(item.tva) : 0,
         remise: item.remise ? parseFloat(item.remise) : 0,
+        
       };
 
       facture.articles.push(factureArticle);
@@ -160,6 +202,10 @@ exports.updateFactureFournisseur = async (req, res) => {
         totalTTC,
         timbreFiscal,
         conditionPaiement,
+        paymentMethods,
+        montantRetenue,
+        hasRetenue,
+        espaceNotes,
       } = req.body;
   
       const repo = AppDataSource.getRepository(FactureFournisseur);
@@ -177,6 +223,38 @@ exports.updateFactureFournisseur = async (req, res) => {
         return res.status(404).json({ message: "Facture fournisseur non trouvée" });
       }
   
+      let processedPaymentMethods = [];
+      let totalPaymentAmount = 0;
+      let hasRetention = false;
+      let retentionAmount = 0;
+  
+      if (paymentMethods && Array.isArray(paymentMethods)) {
+        processedPaymentMethods = paymentMethods.map((pm) => {
+          if (pm.method === "retenue") {
+            hasRetention = true;
+            retentionAmount = parseFloat(montantRetenue) || 0;
+            return {
+              method: pm.method,
+              amount: 0,
+              numero: pm.numero || "",
+              banque: pm.banque || "",
+              dateEcheance: pm.dateEcheance || "",
+              tauxRetention: pm.tauxRetention || 1
+            };
+          } else {
+            const amount = parseFloat(pm.amount) || 0;
+            totalPaymentAmount += amount;
+            return {
+              method: pm.method,
+              amount: amount,
+              numero: pm.numero || "",
+              banque: pm.banque || "",
+              dateEcheance: pm.dateEcheance || "",
+            };
+          }
+        });
+      }
+      
       // ✅ Update basic fields
       facture.numeroFacture = numeroFacture || facture.numeroFacture;
       facture.dateFacture = dateFacture ? new Date(dateFacture) : facture.dateFacture;
@@ -192,6 +270,9 @@ exports.updateFactureFournisseur = async (req, res) => {
       facture.totalTVA = parseFloat(totalTVA ?? facture.totalTVA ?? 0);
       facture.totalTTC = parseFloat(totalTTC ?? facture.totalTTC ?? 0);
       facture.timbreFiscal = !!timbreFiscal;
+      facture.paymentMethods = processedPaymentMethods;
+      facture.montantRetenue = retentionAmount;
+      facture.hasRetenue = hasRetention;
       facture.conditionPaiement = conditionPaiement || facture.conditionPaiement || null;
   
       // ✅ Update fournisseur if changed
