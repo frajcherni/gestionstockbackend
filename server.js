@@ -31,11 +31,7 @@ app.use("/uploads", express.static("uploads"));
 
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "http://54.37.159.225",
-      "https://www.royallumiere.tn",
-    ], // 👈 Add your frontend URLs
+    origin: ["http://localhost:3000", "http://54.37.159.225"], // 👈 Add your frontend URLs
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
@@ -64,7 +60,7 @@ app.use("/api/FacturesFournisseur", FactureFournisseurRoutes);
 app.use("/api/factures-client", FactureClientRoutes);
 app.use("/api/PaymentFournisseur", PaymentFournisseurRoutes);
 app.use("/api/EncaissementClient", encaissementClientRoutes);
-app.use("/api/auth", AuthRoutes);
+app.use("/api/Auth", AuthRoutes);
 app.use("/api/getpayment", TresorieRoutes);
 
 app.use("/api/paiements-client", paiementClientRoutes);
