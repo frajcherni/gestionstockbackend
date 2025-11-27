@@ -645,27 +645,32 @@ exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
     const prefix = "LIVRAISON";
+    const MIN_START = 350;   // ← your required starting number
 
     const repo = AppDataSource.getRepository(BonLivraison);
 
-    // Get the last numeroLivraison for this year
+    // Get last number for this year
     const lastBon = await repo
       .createQueryBuilder("bl")
       .where("bl.numeroLivraison LIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
-      .orderBy("bl.numeroLivraison", "DESC")
+      .orderBy(
+        "CAST(SUBSTRING(bl.numeroLivraison, LENGTH(:prefix) + 2, 10) AS UNSIGNED)",
+        "DESC"
+      )
+      .setParameter("prefix", prefix)
       .getOne();
 
-    let nextNumber = 350;
+    let nextNumber = MIN_START;
 
-    if (lastBon && lastBon.numeroLivraison) {
-      // Match BL-0001/2025
-      const match = lastBon.numeroLivraison.match(
-        new RegExp(`^${prefix}-(\\d+)/${year}$`)
-      );
+    if (lastBon?.numeroLivraison) {
+      const regex = new RegExp(`^${prefix}-(\\d{1,5})/${year}$`);
+      const match = lastBon.numeroLivraison.match(regex);
+
       if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
+        const lastNum = parseInt(match[1], 10);
+        nextNumber = Math.max(lastNum + 1, MIN_START);
       }
     }
 
@@ -677,11 +682,12 @@ exports.getNextLivraisonNumber = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Erreur lors de la g�n�ration du num�ro de livraison",
+      message: "Erreur lors de la génération du numéro de livraison",
       error: err.message,
     });
   }
 };
+
 
 // ✅ DELETE — restore article quantities and update BC status before deleting bon
 
