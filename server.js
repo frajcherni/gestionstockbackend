@@ -18,23 +18,28 @@ const encaissementClientRoutes = require("./routes/encaissementClientRoutes");
 
 const vendeurRoutes = require("./routes/vendeurRoutes");
 const BonLivraisonRoutes = require("./routes/BonLivraisonRoutes");
-const AuthRoutes =  require("./routes/AuthRoutes");
-const TresorieRoutes =  require("./routes/TresorieRoutes");
+const AuthRoutes = require("./routes/AuthRoutes");
+const TresorieRoutes = require("./routes/TresorieRoutes");
 const paiementClientRoutes = require("./routes/paiementClientRoutes");
 
 // Use the routes
 // Use the routes
 // Use the routes
 
-
 const app = express();
-app.use('/uploads', express.static('uploads'));
+app.use("/uploads", express.static("uploads"));
 
-app.use(cors({
-  origin: ["http://localhost:3000", "http://54.37.159.225"], // 👈 Add your frontend URLs
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "http://54.37.159.225",
+      "https://www.royallumiere.tn",
+    ], // 👈 Add your frontend URLs
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 app.use((err, req, res, next) => {
@@ -59,24 +64,23 @@ app.use("/api/FacturesFournisseur", FactureFournisseurRoutes);
 app.use("/api/factures-client", FactureClientRoutes);
 app.use("/api/PaymentFournisseur", PaymentFournisseurRoutes);
 app.use("/api/EncaissementClient", encaissementClientRoutes);
-app.use("/api/Auth", AuthRoutes);
+app.use("/api/auth", AuthRoutes);
 app.use("/api/getpayment", TresorieRoutes);
 
 app.use("/api/paiements-client", paiementClientRoutes);
 
-app.get('/health', (req, res) => {
-  res.json({ 
-      status: 'OK', 
-      message: 'Trésorerie API is running',
-      timestamp: new Date().toISOString()
+app.get("/health", (req, res) => {
+  res.json({
+    status: "OK",
+    message: "Trésorerie API is running",
+    timestamp: new Date().toISOString(),
   });
 });
-
 
 AppDataSource.initialize()
   .then(() => {
     console.log("🟢 Connected to DB");
-    app.listen(5000, "0.0.0.0" , () => {
+    app.listen(5000, "0.0.0.0", () => {
       console.log("🚀 Server running on http://localhost:5000");
     });
   })
@@ -84,5 +88,3 @@ AppDataSource.initialize()
     console.error("🔴 Database connection error:", error);
     process.exit(1);
   });
-
-
