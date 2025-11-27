@@ -28,10 +28,8 @@ exports.createBonLivraison = async (req, res) => {
       bonCommandeClient_id,
       articles,
       taxMode,
-      voiture,
-      serie,
-      chauffeur,
-      cin
+    
+      livraisonInfo 
     } = req.body;
 
     const clientRepo = queryRunner.manager.getRepository(Client);
@@ -40,6 +38,14 @@ exports.createBonLivraison = async (req, res) => {
     const bonRepo = queryRunner.manager.getRepository(BonLivraison);
     const bonCmdClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
     const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+
+    const deliveryData = {
+      voiture:  (livraisonInfo && livraisonInfo.voiture) || null,
+      serie:  (livraisonInfo && livraisonInfo.serie) || null,
+      chauffeur: (livraisonInfo && livraisonInfo.chauffeur) || null,
+      cin: livraisonInfo.cin || null
+    };
+
 
     let client = null;
     let vendeur = null;
@@ -221,10 +227,8 @@ exports.createBonLivraison = async (req, res) => {
       vendeur,
       taxMode,
       bonCommandeClient: bonCommandeClient_id ? bonCommandeClient : null,
-      voiture: voiture || null,
-      serie: serie || null,
-      chauffeur: chauffeur || null,
-      cin: cin || null,
+  
+      ...deliveryData,
       articles: finalArticles,
     };
 
@@ -245,6 +249,7 @@ exports.createBonLivraison = async (req, res) => {
     await queryRunner.release();
   }
 };
+// ✅ UPDATE - Handle all restoration cases properly
 // ✅ UPDATE - Handle all restoration cases properly
 exports.updateBonLivraison = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -276,7 +281,7 @@ exports.updateBonLivraison = async (req, res) => {
       return res.status(404).json({ message: "Bon de livraison introuvable" });
     }
 
-    // Extract all fields from req.body
+    // ✅ Extract all fields from req.body including delivery info
     const { 
       dateLivraison, 
       remise, 
@@ -284,10 +289,12 @@ exports.updateBonLivraison = async (req, res) => {
       notes, 
       taxMode, 
       articles,
+      // ✅ Add delivery info extraction
       voiture,
-      serie, 
-      chauffeur, 
-      cin 
+      serie,
+      chauffeur,
+      cin,
+      livraisonInfo // Handle both direct fields and nested object
     } = req.body;
 
     // Update basic information
@@ -300,11 +307,29 @@ exports.updateBonLivraison = async (req, res) => {
     bon.taxMode = taxMode || bon.taxMode;
     bon.status = "Livré"; // Always set to "Livré"
     
-    // Update delivery information
-    bon.voiture = voiture !== undefined ? voiture : bon.voiture;
-    bon.serie = serie !== undefined ? serie : bon.serie;
-    bon.chauffeur = chauffeur !== undefined ? chauffeur : bon.chauffeur;
-    bon.cin = cin !== undefined ? cin : bon.cin;
+    // ✅ Update delivery information - handle both direct fields and nested object
+    bon.voiture = voiture !== undefined ? voiture : 
+                  (livraisonInfo && livraisonInfo.voiture !== undefined) ? livraisonInfo.voiture : 
+                  bon.voiture;
+    
+    bon.serie = serie !== undefined ? serie : 
+                (livraisonInfo && livraisonInfo.serie !== undefined) ? livraisonInfo.serie : 
+                bon.serie;
+    
+    bon.chauffeur = chauffeur !== undefined ? chauffeur : 
+                    (livraisonInfo && livraisonInfo.chauffeur !== undefined) ? livraisonInfo.chauffeur : 
+                    bon.chauffeur;
+    
+    bon.cin = cin !== undefined ? cin : 
+              (livraisonInfo && livraisonInfo.cin !== undefined) ? livraisonInfo.cin : 
+              bon.cin;
+
+    console.log("Updated delivery info:", {
+      voiture: bon.voiture,
+      serie: bon.serie,
+      chauffeur: bon.chauffeur,
+      cin: bon.cin
+    });
 
     // Update articles
     if (articles && Array.isArray(articles)) {
@@ -409,6 +434,7 @@ exports.updateBonLivraison = async (req, res) => {
             article,
             quantite: quantite,
             prix_unitaire,
+            prix_ttc: prix_unitaire * (1 + tvaRate / 100), // Make sure to include prix_ttc
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           })
@@ -631,7 +657,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
       .orderBy("bl.numeroLivraison", "DESC")
       .getOne();
 
-    let nextNumber = 1;
+    let nextNumber = 350;
 
     if (lastBon && lastBon.numeroLivraison) {
       // Match BL-0001/2025

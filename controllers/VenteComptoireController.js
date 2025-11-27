@@ -394,32 +394,33 @@ exports.deleteVenteComptoire = async (req, res) => {
 exports.fetchNextVenteComptoireNumber = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(VenteComptoire);
-
-    // Get last vente by descending id
     const lastVente = await repo.findOne({
       where: {},
       order: { id: "DESC" },
     });
 
     const currentYear = new Date().getFullYear();
+    const DEFAULT_START_SEQ = 925;      // ← هنا
+
     let nextNumber;
 
     if (lastVente) {
-      // Example of last numeroCommande: VC-0005/2025
       const [prefix, yearPart] = lastVente.numeroCommande.split("/");
+      const lastSeq = parseInt(prefix.split("-")[1], 10);
 
-      if (parseInt(yearPart) === currentYear) {
-        // continue numbering within the same year
-        const lastSeq = parseInt(prefix.split("-")[1]);
-        const newSeq = (lastSeq + 1).toString().padStart(4, "0");
+      if (parseInt(yearPart, 10) === currentYear) {
+        const base = Math.max(lastSeq + 1, DEFAULT_START_SEQ);
+        const newSeq = base.toString().padStart(4, "0");
         nextNumber = `VENTE-${newSeq}/${currentYear}`;
       } else {
-        // reset numbering for new year
-        nextNumber = `VENTE-0001/${currentYear}`;
+        // بداية سنة جديدة → ممكن تبقى 0001 أو 0925 حسب رغبتك
+        const newSeq = DEFAULT_START_SEQ.toString().padStart(4, "0");
+        nextNumber = `VENTE-${newSeq}/${currentYear}`;
       }
     } else {
-      // first entry ever
-      nextNumber = `VENTE-0001/${currentYear}`;
+      // أول عملية إطلاقاً
+      const newSeq = DEFAULT_START_SEQ.toString().padStart(4, "0");
+      nextNumber = `VENTE-${newSeq}/${currentYear}`;
     }
 
     res.json({ numeroCommande: nextNumber });
