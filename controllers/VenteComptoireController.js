@@ -400,7 +400,7 @@ exports.fetchNextVenteComptoireNumber = async (req, res) => {
     });
 
     const currentYear = new Date().getFullYear();
-    const DEFAULT_START_SEQ = 925;      // ← هنا
+    const DEFAULT_START_SEQ = 933;      // ← هنا
 
     let nextNumber;
 

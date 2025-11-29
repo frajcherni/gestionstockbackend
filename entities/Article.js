@@ -10,6 +10,8 @@ const Article = new EntitySchema({
         pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
         pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
         puv_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
+        code_barre: { type: "varchar", unique: true, nullable: true }, // NOUVEAU CHAMP
+
         tva: { type: "int", nullable: true },
         puv_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
         type: { type: "varchar", nullable: true },

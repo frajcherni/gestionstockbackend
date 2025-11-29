@@ -635,7 +635,7 @@ exports.getNextCommandeNumber = async (req, res) => {
 
     let nextNumber;
     if (!lastBon || !lastBon.numeroCommande) {
-      nextNumber = 349; // Start from COMMANDE001/year
+      nextNumber = 354; // Start from COMMANDE001/year
     } else {
       const match = lastBon.numeroCommande.match(
         new RegExp(`^${prefix}(\\d{3})/${year}$`)

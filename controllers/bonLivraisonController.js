@@ -28,7 +28,6 @@ exports.createBonLivraison = async (req, res) => {
       bonCommandeClient_id,
       articles,
       taxMode,
-    
       livraisonInfo 
     } = req.body;
 
@@ -40,12 +39,11 @@ exports.createBonLivraison = async (req, res) => {
     const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
 
     const deliveryData = {
-      voiture:  (livraisonInfo && livraisonInfo.voiture) || null,
-      serie:  (livraisonInfo && livraisonInfo.serie) || null,
+      voiture: (livraisonInfo && livraisonInfo.voiture) || null,
+      serie: (livraisonInfo && livraisonInfo.serie) || null,
       chauffeur: (livraisonInfo && livraisonInfo.chauffeur) || null,
-      cin: livraisonInfo.cin || null
+      cin: livraisonInfo?.cin || null
     };
-
 
     let client = null;
     let vendeur = null;
@@ -90,12 +88,12 @@ exports.createBonLivraison = async (req, res) => {
         }
 
         const quantiteCommandee = bonCmdArticle.quantite;
-        const quantiteActuelleLivree = bonCmdArticle.quantiteLivree || 0; // Current delivered in BC
+        const quantiteActuelleLivree = bonCmdArticle.quantiteLivree || 0;
         
         // ✅ Get the NEW quantiteLivree from request
         const nouvelleQuantiteLivree = parseInt(item.quantiteLivree) || 0;
         
-        // ✅ CORRECTED: Calculate EXACT delivery for this BL = New total - Current delivered
+        // ✅ Calculate EXACT delivery for this BL = New total - Current delivered
         const quantiteSouhaiteePourCeBL = nouvelleQuantiteLivree - quantiteActuelleLivree;
 
         console.log(`Article ${article.designation}: Commandé=${quantiteCommandee}, Actuellement livré=${quantiteActuelleLivree}, Nouveau total demandé=${nouvelleQuantiteLivree}, Souhaité pour ce BL=${quantiteSouhaiteePourCeBL}`);
@@ -111,10 +109,9 @@ exports.createBonLivraison = async (req, res) => {
         // ✅ Check if user wants to deliver anything in this BL
         if (quantiteSouhaiteePourCeBL <= 0) {
           console.log(`Quantité nulle ou négative pour ${article.designation} dans ce BL, ignorée`);
-          continue; // Skip zero or negative quantities for this BL
+          continue;
         }
   
-    
         // ✅ Reduce stock for this BL delivery
         article.qte -= quantiteSouhaiteePourCeBL;
         article.qte_physique -= quantiteSouhaiteePourCeBL;
@@ -124,23 +121,32 @@ exports.createBonLivraison = async (req, res) => {
         bonCmdArticle.quantiteLivree = nouvelleQuantiteLivree;
         await bonCmdArticleRepo.save(bonCmdArticle);
 
+        // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
+        let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
+        
         const tvaRate = item.tva ? parseFloat(item.tva) : article.tva || 0;
 
+        // If prix_ttc not provided from frontend, calculate it
+        if (!prix_ttc || isNaN(prix_ttc)) {
+          prix_ttc = prix_unitaire * (1 + tvaRate / 100);
+        }
+
+        // Handle tax mode conversion
         if (taxMode === "TTC") {
-          prix_unitaire = prix_unitaire / (1 + tvaRate / 100);
+          prix_unitaire = prix_ttc / (1 + tvaRate / 100);
         }
 
         finalArticles.push({
           article,
-          quantite: quantiteSouhaiteePourCeBL, // Store only the quantity for THIS BL
+          quantite: quantiteSouhaiteePourCeBL,
           prix_unitaire,
-          prix_ttc: prix_unitaire * (1 + tvaRate / 100), // Make sure this line exists
+          prix_ttc: prix_ttc, // ✅ Store the TTC price
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : null,
         });
 
-        console.log(`Livraison BL: ${quantiteSouhaiteePourCeBL} unités - Total livré mis à jour dans BC: ${nouvelleQuantiteLivree}`);
+        console.log(`Livraison BL: ${quantiteSouhaiteePourCeBL} unités - Prix TTC: ${prix_ttc}`);
       }
 
       // ✅ Update BC status based on NEW delivered quantities
@@ -160,7 +166,7 @@ exports.createBonLivraison = async (req, res) => {
       console.log(`Statut BC mis à jour: ${bcStatus}, Total commandé: ${totalOrdered}, Total livré: ${totalAfterThisBL}`);
 
     } else {
-      // BL without BC (direct delivery) - FIXED: Use quantite instead of quantiteLivree
+      // BL without BC (direct delivery)
       client = await clientRepo.findOneBy({ id: parseInt(client_id) });
       vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
 
@@ -176,7 +182,6 @@ exports.createBonLivraison = async (req, res) => {
           return res.status(404).json({ message: `Article ${item.article_id} introuvable` });
         }
 
-        // ✅ FIXED: Use quantite for direct BL creation (not quantiteLivree)
         const quantitePourStock = parseInt(item.quantite) || 0;
 
         // Skip if no delivery requested
@@ -184,13 +189,20 @@ exports.createBonLivraison = async (req, res) => {
           continue;
         }
 
-        // Check stock availability
-  
+        // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
+        let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
+        
         const tvaRate = item.tva ? parseFloat(item.tva) : article.tva || 0;
 
+        // If prix_ttc not provided from frontend, calculate it
+        if (!prix_ttc || isNaN(prix_ttc)) {
+          prix_ttc = prix_unitaire * (1 + tvaRate / 100);
+        }
+
+        // Handle tax mode conversion
         if (taxMode === "TTC") {
-          prix_unitaire = prix_unitaire / (1 + tvaRate / 100);
+          prix_unitaire = prix_ttc / (1 + tvaRate / 100);
         }
 
         // Reduce stock
@@ -202,7 +214,7 @@ exports.createBonLivraison = async (req, res) => {
           article,
           quantite: quantitePourStock,
           prix_unitaire,
-          prix_ttc: prix_unitaire * (1 + tvaRate / 100), // Make sure this line exists
+          prix_ttc: prix_ttc, // ✅ Store the TTC price
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : null,
         });
@@ -227,7 +239,6 @@ exports.createBonLivraison = async (req, res) => {
       vendeur,
       taxMode,
       bonCommandeClient: bonCommandeClient_id ? bonCommandeClient : null,
-  
       ...deliveryData,
       articles: finalArticles,
     };
@@ -305,9 +316,9 @@ exports.updateBonLivraison = async (req, res) => {
     bon.remiseType = remiseType || bon.remiseType;
     bon.notes = notes || bon.notes;
     bon.taxMode = taxMode || bon.taxMode;
-    bon.status = "Livré"; // Always set to "Livré"
+    bon.status = "Livré";
     
-    // ✅ Update delivery information - handle both direct fields and nested object
+    // ✅ Update delivery information
     bon.voiture = voiture !== undefined ? voiture : 
                   (livraisonInfo && livraisonInfo.voiture !== undefined) ? livraisonInfo.voiture : 
                   bon.voiture;
@@ -391,10 +402,20 @@ exports.updateBonLivraison = async (req, res) => {
             .json({ message: `Article ${item.article_id} introuvable` });
         }
 
+        // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
+        let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
+        
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
+
+        // If prix_ttc not provided from frontend, calculate it
+        if (!prix_ttc || isNaN(prix_ttc)) {
+          prix_ttc = prix_unitaire * (1 + tvaRate / 100);
+        }
+
+        // Handle tax mode conversion
         if (taxMode === "TTC") {
-          prix_unitaire = prix_unitaire / (1 + tvaRate / 100);
+          prix_unitaire = prix_ttc / (1 + tvaRate / 100);
         }
 
         const quantite = parseInt(item.quantite);
@@ -434,7 +455,7 @@ exports.updateBonLivraison = async (req, res) => {
             article,
             quantite: quantite,
             prix_unitaire,
-            prix_ttc: prix_unitaire * (1 + tvaRate / 100), // Make sure to include prix_ttc
+            prix_ttc: prix_ttc, // ✅ Store the TTC price from frontend
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           })
@@ -494,7 +515,6 @@ exports.updateBonLivraison = async (req, res) => {
     await queryRunner.release();
   }
 };
-
 // ✅ DELETE - Restore everything properly
 exports.deleteBonLivraison = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
