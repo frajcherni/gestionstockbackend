@@ -28,21 +28,24 @@ exports.createBonLivraison = async (req, res) => {
       bonCommandeClient_id,
       articles,
       taxMode,
-      livraisonInfo 
+      livraisonInfo,
     } = req.body;
 
     const clientRepo = queryRunner.manager.getRepository(Client);
     const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
     const articleRepo = queryRunner.manager.getRepository(Article);
     const bonRepo = queryRunner.manager.getRepository(BonLivraison);
-    const bonCmdClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
-    const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+    const bonCmdClientRepo =
+      queryRunner.manager.getRepository(BonCommandeClient);
+    const bonCmdArticleRepo = queryRunner.manager.getRepository(
+      BonCommandeClientArticle
+    );
 
     const deliveryData = {
       voiture: (livraisonInfo && livraisonInfo.voiture) || null,
       serie: (livraisonInfo && livraisonInfo.serie) || null,
       chauffeur: (livraisonInfo && livraisonInfo.chauffeur) || null,
-      cin: livraisonInfo?.cin || null
+      cin: livraisonInfo?.cin || null,
     };
 
     let client = null;
@@ -64,7 +67,9 @@ exports.createBonLivraison = async (req, res) => {
 
       if (!bonCommandeClient) {
         await queryRunner.rollbackTransaction();
-        return res.status(404).json({ message: "Bon de commande client non trouvé" });
+        return res
+          .status(404)
+          .json({ message: "Bon de commande client non trouvé" });
       }
 
       client = bonCommandeClient.client;
@@ -72,46 +77,59 @@ exports.createBonLivraison = async (req, res) => {
 
       // Process each article for delivery
       for (const item of articles) {
-        const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
+        const article = await articleRepo.findOneBy({
+          id: parseInt(item.article_id),
+        });
         if (!article) {
           await queryRunner.rollbackTransaction();
-          return res.status(404).json({ message: `Article ${item.article_id} introuvable` });
+          return res
+            .status(404)
+            .json({ message: `Article ${item.article_id} introuvable` });
         }
 
         const bonCmdArticle = bonCommandeClient.articles.find(
-          a => a.article.id === parseInt(item.article_id)
+          (a) => a.article.id === parseInt(item.article_id)
         );
 
         if (!bonCmdArticle) {
           await queryRunner.rollbackTransaction();
-          return res.status(400).json({ message: `Article ${item.article_id} non trouvé dans le bon de commande` });
+          return res
+            .status(400)
+            .json({
+              message: `Article ${item.article_id} non trouvé dans le bon de commande`,
+            });
         }
 
         const quantiteCommandee = bonCmdArticle.quantite;
         const quantiteActuelleLivree = bonCmdArticle.quantiteLivree || 0;
-        
+
         // ✅ Get the NEW quantiteLivree from request
         const nouvelleQuantiteLivree = parseInt(item.quantiteLivree) || 0;
-        
-        // ✅ Calculate EXACT delivery for this BL = New total - Current delivered
-        const quantiteSouhaiteePourCeBL = nouvelleQuantiteLivree - quantiteActuelleLivree;
 
-        console.log(`Article ${article.designation}: Commandé=${quantiteCommandee}, Actuellement livré=${quantiteActuelleLivree}, Nouveau total demandé=${nouvelleQuantiteLivree}, Souhaité pour ce BL=${quantiteSouhaiteePourCeBL}`);
+        // ✅ Calculate EXACT delivery for this BL = New total - Current delivered
+        const quantiteSouhaiteePourCeBL =
+          nouvelleQuantiteLivree - quantiteActuelleLivree;
+
+        console.log(
+          `Article ${article.designation}: Commandé=${quantiteCommandee}, Actuellement livré=${quantiteActuelleLivree}, Nouveau total demandé=${nouvelleQuantiteLivree}, Souhaité pour ce BL=${quantiteSouhaiteePourCeBL}`
+        );
 
         // ✅ Validate that new total doesn't exceed ordered quantity
         if (nouvelleQuantiteLivree > quantiteCommandee) {
           await queryRunner.rollbackTransaction();
           return res.status(400).json({
-            message: `Quantité totale livrée (${nouvelleQuantiteLivree}) ne peut pas dépasser la quantité commandée (${quantiteCommandee}) pour ${article.designation}`
+            message: `Quantité totale livrée (${nouvelleQuantiteLivree}) ne peut pas dépasser la quantité commandée (${quantiteCommandee}) pour ${article.designation}`,
           });
         }
 
         // ✅ Check if user wants to deliver anything in this BL
         if (quantiteSouhaiteePourCeBL <= 0) {
-          console.log(`Quantité nulle ou négative pour ${article.designation} dans ce BL, ignorée`);
+          console.log(
+            `Quantité nulle ou négative pour ${article.designation} dans ce BL, ignorée`
+          );
           continue;
         }
-  
+
         // ✅ Reduce stock for this BL delivery
         article.qte -= quantiteSouhaiteePourCeBL;
         article.qte_physique -= quantiteSouhaiteePourCeBL;
@@ -124,7 +142,7 @@ exports.createBonLivraison = async (req, res) => {
         // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
         let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
-        
+
         const tvaRate = item.tva ? parseFloat(item.tva) : article.tva || 0;
 
         // If prix_ttc not provided from frontend, calculate it
@@ -146,12 +164,20 @@ exports.createBonLivraison = async (req, res) => {
           remise: item.remise ? parseFloat(item.remise) : null,
         });
 
-        console.log(`Livraison BL: ${quantiteSouhaiteePourCeBL} unités - Prix TTC: ${prix_ttc}`);
+        console.log(
+          `Livraison BL: ${quantiteSouhaiteePourCeBL} unités - Prix TTC: ${prix_ttc}`
+        );
       }
 
       // ✅ Update BC status based on NEW delivered quantities
-      const totalAfterThisBL = bonCommandeClient.articles.reduce((sum, item) => sum + item.quantiteLivree, 0);
-      const totalOrdered = bonCommandeClient.articles.reduce((sum, item) => sum + item.quantite, 0);
+      const totalAfterThisBL = bonCommandeClient.articles.reduce(
+        (sum, item) => sum + item.quantiteLivree,
+        0
+      );
+      const totalOrdered = bonCommandeClient.articles.reduce(
+        (sum, item) => sum + item.quantite,
+        0
+      );
 
       let bcStatus = "Confirme";
       if (totalAfterThisBL === totalOrdered && totalOrdered > 0) {
@@ -163,8 +189,9 @@ exports.createBonLivraison = async (req, res) => {
       // ✅ Update BC status
       await bonCmdClientRepo.update(bonCommandeClient.id, { status: bcStatus });
 
-      console.log(`Statut BC mis à jour: ${bcStatus}, Total commandé: ${totalOrdered}, Total livré: ${totalAfterThisBL}`);
-
+      console.log(
+        `Statut BC mis à jour: ${bcStatus}, Total commandé: ${totalOrdered}, Total livré: ${totalAfterThisBL}`
+      );
     } else {
       // BL without BC (direct delivery)
       client = await clientRepo.findOneBy({ id: parseInt(client_id) });
@@ -172,14 +199,20 @@ exports.createBonLivraison = async (req, res) => {
 
       if (!client || !vendeur) {
         await queryRunner.rollbackTransaction();
-        return res.status(404).json({ message: "Client ou vendeur introuvable" });
+        return res
+          .status(404)
+          .json({ message: "Client ou vendeur introuvable" });
       }
 
       for (const item of articles) {
-        const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
+        const article = await articleRepo.findOneBy({
+          id: parseInt(item.article_id),
+        });
         if (!article) {
           await queryRunner.rollbackTransaction();
-          return res.status(404).json({ message: `Article ${item.article_id} introuvable` });
+          return res
+            .status(404)
+            .json({ message: `Article ${item.article_id} introuvable` });
         }
 
         const quantitePourStock = parseInt(item.quantite) || 0;
@@ -192,7 +225,7 @@ exports.createBonLivraison = async (req, res) => {
         // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
         let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
-        
+
         const tvaRate = item.tva ? parseFloat(item.tva) : article.tva || 0;
 
         // If prix_ttc not provided from frontend, calculate it
@@ -224,7 +257,9 @@ exports.createBonLivraison = async (req, res) => {
     // Check if we have any articles to deliver
     if (finalArticles.length === 0) {
       await queryRunner.rollbackTransaction();
-      return res.status(400).json({ message: "Aucune quantité à livrer spécifiée" });
+      return res
+        .status(400)
+        .json({ message: "Aucune quantité à livrer spécifiée" });
     }
 
     // Create BL
@@ -269,10 +304,14 @@ exports.updateBonLivraison = async (req, res) => {
 
   try {
     const bonRepo = queryRunner.manager.getRepository(BonLivraison);
-    const bonArticleRepo = queryRunner.manager.getRepository(BonLivraisonArticle);
+    const bonArticleRepo =
+      queryRunner.manager.getRepository(BonLivraisonArticle);
     const articleRepo = queryRunner.manager.getRepository(Article);
-    const bonCmdClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
-    const bonCmdArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+    const bonCmdClientRepo =
+      queryRunner.manager.getRepository(BonCommandeClient);
+    const bonCmdArticleRepo = queryRunner.manager.getRepository(
+      BonCommandeClientArticle
+    );
 
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
@@ -293,19 +332,19 @@ exports.updateBonLivraison = async (req, res) => {
     }
 
     // ✅ Extract all fields from req.body including delivery info
-    const { 
-      dateLivraison, 
-      remise, 
-      remiseType, 
-      notes, 
-      taxMode, 
+    const {
+      dateLivraison,
+      remise,
+      remiseType,
+      notes,
+      taxMode,
       articles,
       // ✅ Add delivery info extraction
       voiture,
       serie,
       chauffeur,
       cin,
-      livraisonInfo // Handle both direct fields and nested object
+      livraisonInfo, // Handle both direct fields and nested object
     } = req.body;
 
     // Update basic information
@@ -317,29 +356,41 @@ exports.updateBonLivraison = async (req, res) => {
     bon.notes = notes || bon.notes;
     bon.taxMode = taxMode || bon.taxMode;
     bon.status = "Livré";
-    
+
     // ✅ Update delivery information
-    bon.voiture = voiture !== undefined ? voiture : 
-                  (livraisonInfo && livraisonInfo.voiture !== undefined) ? livraisonInfo.voiture : 
-                  bon.voiture;
-    
-    bon.serie = serie !== undefined ? serie : 
-                (livraisonInfo && livraisonInfo.serie !== undefined) ? livraisonInfo.serie : 
-                bon.serie;
-    
-    bon.chauffeur = chauffeur !== undefined ? chauffeur : 
-                    (livraisonInfo && livraisonInfo.chauffeur !== undefined) ? livraisonInfo.chauffeur : 
-                    bon.chauffeur;
-    
-    bon.cin = cin !== undefined ? cin : 
-              (livraisonInfo && livraisonInfo.cin !== undefined) ? livraisonInfo.cin : 
-              bon.cin;
+    bon.voiture =
+      voiture !== undefined
+        ? voiture
+        : livraisonInfo && livraisonInfo.voiture !== undefined
+        ? livraisonInfo.voiture
+        : bon.voiture;
+
+    bon.serie =
+      serie !== undefined
+        ? serie
+        : livraisonInfo && livraisonInfo.serie !== undefined
+        ? livraisonInfo.serie
+        : bon.serie;
+
+    bon.chauffeur =
+      chauffeur !== undefined
+        ? chauffeur
+        : livraisonInfo && livraisonInfo.chauffeur !== undefined
+        ? livraisonInfo.chauffeur
+        : bon.chauffeur;
+
+    bon.cin =
+      cin !== undefined
+        ? cin
+        : livraisonInfo && livraisonInfo.cin !== undefined
+        ? livraisonInfo.cin
+        : bon.cin;
 
     console.log("Updated delivery info:", {
       voiture: bon.voiture,
       serie: bon.serie,
       chauffeur: bon.chauffeur,
-      cin: bon.cin
+      cin: bon.cin,
     });
 
     // Update articles
@@ -405,7 +456,7 @@ exports.updateBonLivraison = async (req, res) => {
         // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
         let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
-        
+
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
 
         // If prix_ttc not provided from frontend, calculate it
@@ -664,41 +715,58 @@ exports.annulerBonLivraison = async (req, res) => {
 exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "LIVRAISON";
-    const MIN_START = 350;   // ← your required starting number
+    const prefix = "LIVRAISON-"; // This should be LIVRAISON- not BL-
+    const MIN_START = 355;
 
     const repo = AppDataSource.getRepository(BonLivraison);
 
-    // Get last number for this year
+    // Get last bon livraison for this year
     const lastBon = await repo
-      .createQueryBuilder("bl")
-      .where("bl.numeroLivraison LIKE :pattern", {
-        pattern: `${prefix}-%/${year}`,
+      .createQueryBuilder("bon")
+      .where("bon.numeroLivraison LIKE :pattern", {
+        pattern: `${prefix}%/${year}`,
       })
-      .orderBy(
-        "CAST(SUBSTRING(bl.numeroLivraison, LENGTH(:prefix) + 2, 10) AS UNSIGNED)",
-        "DESC"
-      )
-      .setParameter("prefix", prefix)
+      .orderBy("bon.createdAt", "DESC")
       .getOne();
 
-    let nextNumber = MIN_START;
-
-    if (lastBon?.numeroLivraison) {
-      const regex = new RegExp(`^${prefix}-(\\d{1,5})/${year}$`);
-      const match = lastBon.numeroLivraison.match(regex);
-
-      if (match) {
-        const lastNum = parseInt(match[1], 10);
-        nextNumber = Math.max(lastNum + 1, MIN_START);
-      }
+    let nextNumber;
+    
+    if (!lastBon || !lastBon.numeroLivraison) {
+      nextNumber = MIN_START; // Start from 350
+    } else {
+      // Extract number from LIVRAISON-350/2025
+      const match = lastBon.numeroLivraison.match(
+        new RegExp(`^${prefix}(\\d{3})/${year}$`)
+      );
+      nextNumber = match ? parseInt(match[1], 10) + 1 : MIN_START;
     }
 
-    const nextLivraisonNumber = `${prefix}-${nextNumber
-      .toString()
-      .padStart(3, "0")}/${year}`;
+    // Ensure minimum 350
+    nextNumber = Math.max(nextNumber, MIN_START);
 
-    res.json({ numeroLivraison: nextLivraisonNumber });
+    let nextLivraisonNumber;
+
+    while (true) {
+      // Format: LIVRAISON-350/2025
+      nextLivraisonNumber = `${prefix}${String(nextNumber).padStart(
+        3,
+        "0"
+      )}/${year}`;
+
+      // Check if it already exists
+      const existing = await repo.findOne({
+        where: { numeroLivraison: nextLivraisonNumber },
+      });
+
+      if (!existing) break; // unique number found
+      nextNumber++; // increment and try next
+    }
+
+    res.json({ 
+      numeroLivraison: nextLivraisonNumber,
+      nextNumber: nextNumber
+    });
+    
   } catch (err) {
     console.error(err);
     res.status(500).json({
@@ -707,7 +775,6 @@ exports.getNextLivraisonNumber = async (req, res) => {
     });
   }
 };
-
 
 // ✅ DELETE — restore article quantities and update BC status before deleting bon
 
@@ -746,47 +813,7 @@ exports.annulerBonLivraison = async (req, res) => {
   }
 };
 
-exports.getNextLivraisonNumber = async (req, res) => {
-  try {
-    const year = new Date().getFullYear();
-    const prefix = "BL";
 
-    const repo = AppDataSource.getRepository(BonLivraison);
-
-    // Get the last numeroLivraison for this year
-    const lastBon = await repo
-      .createQueryBuilder("bl")
-      .where("bl.numeroLivraison LIKE :pattern", {
-        pattern: `${prefix}-%/${year}`,
-      })
-      .orderBy("bl.numeroLivraison", "DESC")
-      .getOne();
-
-    let nextNumber = 1;
-
-    if (lastBon && lastBon.numeroLivraison) {
-      // Match BL-0001/2025
-      const match = lastBon.numeroLivraison.match(
-        new RegExp(`^${prefix}-(\\d+)/${year}$`)
-      );
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
-    }
-
-    const nextLivraisonNumber = `${prefix}-${nextNumber
-      .toString()
-      .padStart(4, "0")}/${year}`;
-
-    res.json({ numeroLivraison: nextLivraisonNumber });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({
-      message: "Erreur lors de la g�n�ration du num�ro de livraison",
-      error: err.message,
-    });
-  }
-};
 
 exports.getAllBonLivraisons = async (req, res) => {
   try {
