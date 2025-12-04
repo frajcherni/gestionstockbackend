@@ -410,7 +410,7 @@ exports.getNextFactureNumber = async (req, res) => {
       .orderBy("fact.id", "DESC")
       .getOne();
 
-    let nextNumber = 417;
+    let nextNumber = 426;
 
     if (lastFacture) {
       // Extract the numeric part between "-" and "/"

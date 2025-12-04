@@ -93,11 +93,9 @@ exports.createBonLivraison = async (req, res) => {
 
         if (!bonCmdArticle) {
           await queryRunner.rollbackTransaction();
-          return res
-            .status(400)
-            .json({
-              message: `Article ${item.article_id} non trouvé dans le bon de commande`,
-            });
+          return res.status(400).json({
+            message: `Article ${item.article_id} non trouvé dans le bon de commande`,
+          });
         }
 
         const quantiteCommandee = bonCmdArticle.quantite;
@@ -716,7 +714,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
     const prefix = "LIVRAISON-"; // This should be LIVRAISON- not BL-
-    const MIN_START = 355;
+    const MIN_START = 364;
 
     const repo = AppDataSource.getRepository(BonLivraison);
 
@@ -730,7 +728,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
       .getOne();
 
     let nextNumber;
-    
+
     if (!lastBon || !lastBon.numeroLivraison) {
       nextNumber = MIN_START; // Start from 350
     } else {
@@ -762,11 +760,10 @@ exports.getNextLivraisonNumber = async (req, res) => {
       nextNumber++; // increment and try next
     }
 
-    res.json({ 
+    res.json({
       numeroLivraison: nextLivraisonNumber,
-      nextNumber: nextNumber
+      nextNumber: nextNumber,
     });
-    
   } catch (err) {
     console.error(err);
     res.status(500).json({
@@ -812,8 +809,6 @@ exports.annulerBonLivraison = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
-
-
 
 exports.getAllBonLivraisons = async (req, res) => {
   try {

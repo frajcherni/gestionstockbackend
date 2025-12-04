@@ -78,18 +78,16 @@ exports.createVenteComptoire = async (req, res) => {
       }
 
       if (!item.quantite || !item.prix_unitaire) {
-        return res
-          .status(400)
-          .json({
-            message:
-              "Quantité et prix unitaire sont obligatoires pour chaque article",
-          });
+        return res.status(400).json({
+          message:
+            "Quantité et prix unitaire sont obligatoires pour chaque article",
+        });
       }
 
       const tvaRate =
         item.tva != null ? parseFloat(item.tva) : article.tva || 0;
       let prixUnitaire = parseFloat(item.prix_unitaire);
-      
+
       // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
       let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
       if (!prix_ttc) {
@@ -173,19 +171,23 @@ exports.updateVenteComptoire = async (req, res) => {
     if (req.body.remiseType) updates.remiseType = req.body.remiseType;
     if (req.body.notes !== undefined) updates.notes = req.body.notes;
     if (req.body.taxMode) updates.taxMode = req.body.taxMode;
-    
+
     // ✅ ADD PAYMENT UPDATES
-    if (req.body.paymentMethods !== undefined) 
+    if (req.body.paymentMethods !== undefined)
       updates.paymentMethods = req.body.paymentMethods;
-    if (req.body.totalPaymentAmount !== undefined) 
+    if (req.body.totalPaymentAmount !== undefined)
       updates.totalPaymentAmount = parseFloat(req.body.totalPaymentAmount);
-    if (req.body.espaceNotes !== undefined) 
+    if (req.body.espaceNotes !== undefined)
       updates.espaceNotes = req.body.espaceNotes;
-    
+
     // CALCULATE AND SAVE totalAfterRemise IN UPDATE
-    if (req.body.remise !== undefined || req.body.remiseType || req.body.articles) {
+    if (
+      req.body.remise !== undefined ||
+      req.body.remiseType ||
+      req.body.articles
+    ) {
       let grandTotal = 0;
-      
+
       // Recalculate grand total from articles
       if (req.body.articles && Array.isArray(req.body.articles)) {
         for (const item of req.body.articles) {
@@ -193,30 +195,40 @@ exports.updateVenteComptoire = async (req, res) => {
           const tvaRate = item.tva ? parseFloat(item.tva) : 0;
           const remiseRate = item.remise ? parseFloat(item.remise) : 0;
           const quantite = parseInt(item.quantite);
-          
+
           // CALCULATE prix_ttc FROM prix_unitaire AND TVA
-          const prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : prixUnitaire * (1 + tvaRate / 100);
-          
-          const montantHTLigne = quantite * prixUnitaire * (1 - remiseRate / 100);
+          const prix_ttc = item.prix_ttc
+            ? parseFloat(item.prix_ttc)
+            : prixUnitaire * (1 + tvaRate / 100);
+
+          const montantHTLigne =
+            quantite * prixUnitaire * (1 - remiseRate / 100);
           const montantTTCLigne = quantite * prix_ttc; // Use prix_ttc for TTC calculation
           grandTotal += montantTTCLigne;
         }
       } else {
         // Use existing articles if not provided in update
-        vente.articles.forEach(item => {
-          const montantHTLigne = item.quantite * item.prixUnitaire * (1 - (item.remise || 0) / 100);
-          const montantTTCLigne = item.quantite * (item.prix_ttc || item.prixUnitaire * (1 + (item.tva || 0) / 100));
+        vente.articles.forEach((item) => {
+          const montantHTLigne =
+            item.quantite * item.prixUnitaire * (1 - (item.remise || 0) / 100);
+          const montantTTCLigne =
+            item.quantite *
+            (item.prix_ttc || item.prixUnitaire * (1 + (item.tva || 0) / 100));
           grandTotal += montantTTCLigne;
         });
       }
-      
-      const remiseValue = req.body.remise !== undefined ? parseFloat(req.body.remise) : vente.remise;
+
+      const remiseValue =
+        req.body.remise !== undefined
+          ? parseFloat(req.body.remise)
+          : vente.remise;
       const remiseTypeValue = req.body.remiseType || vente.remiseType;
-      
-      const totalAfterRemise = remiseTypeValue === "percentage"
-        ? grandTotal * (1 - remiseValue / 100)
-        : remiseValue;
-        
+
+      const totalAfterRemise =
+        remiseTypeValue === "percentage"
+          ? grandTotal * (1 - remiseValue / 100)
+          : remiseValue;
+
       updates.totalAfterRemise = totalAfterRemise;
     }
 
@@ -274,7 +286,9 @@ exports.updateVenteComptoire = async (req, res) => {
         const prixUnitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
         // CALCULATE prix_ttc FROM prix_unitaire AND TVA
-        const prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : prixUnitaire * (1 + tvaRate / 100);
+        const prix_ttc = item.prix_ttc
+          ? parseFloat(item.prix_ttc)
+          : prixUnitaire * (1 + tvaRate / 100);
 
         const existing = await venteArticleRepo.findOne({
           where: {
@@ -369,9 +383,6 @@ exports.getAllVenteComptoire = async (req, res) => {
   }
 };
 
-
-  
-
 exports.deleteVenteComptoire = async (req, res) => {
   try {
     const venteArticleRepo = AppDataSource.getRepository(VenteComptoireArticle);
@@ -400,7 +411,7 @@ exports.fetchNextVenteComptoireNumber = async (req, res) => {
     });
 
     const currentYear = new Date().getFullYear();
-    const DEFAULT_START_SEQ = 933;      // ← هنا
+    const DEFAULT_START_SEQ = 948; // ← هنا
 
     let nextNumber;
 
