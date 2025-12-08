@@ -34,7 +34,7 @@ exports.createEncaissement = async (req, res) => {
     montant = montant && !isNaN(Number(montant)) ? Number(montant) : 0;
 
     // Validate modePaiement
-    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre"];
+    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre" , "tpe"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
     }
@@ -223,7 +223,7 @@ exports.updateEncaissement = async (req, res) => {
     montant = montant && !isNaN(Number(montant)) ? Number(montant) : 0;
 
     // Validate modePaiement
-    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre"];
+    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Autre" , "tpe"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
     }
