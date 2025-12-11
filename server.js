@@ -21,6 +21,7 @@ const BonLivraisonRoutes = require("./routes/BonLivraisonRoutes");
 const AuthRoutes = require("./routes/AuthRoutes");
 const TresorieRoutes = require("./routes/TresorieRoutes");
 const paiementClientRoutes = require("./routes/paiementClientRoutes");
+const inventaireRoutes = require("./routes/inventaireRoutes");
 
 // Use the routes
 // Use the routes
@@ -64,6 +65,7 @@ app.use("/api/Auth", AuthRoutes);
 app.use("/api/getpayment", TresorieRoutes);
 
 app.use("/api/paiements-client", paiementClientRoutes);
+app.use("/api/inventaireRoutes", inventaireRoutes);
 
 app.get("/health", (req, res) => {
   res.json({
