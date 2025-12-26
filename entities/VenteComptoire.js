@@ -71,6 +71,8 @@ const VenteComptoireArticle = new EntitySchema({
         quantite: { type: "int" },
         prixUnitaire: { type: "decimal", precision: 10, scale: 3 },
         prix_ttc: { type: "decimal", precision: 10, scale: 3 , nullable : true },
+        fodec: { type: "boolean", default: false , nullable : true},
+
         tva: { type: "decimal", precision: 5, scale: 3, nullable: true },
         remise: { type: "decimal", precision: 5, scale: 3, nullable: true, default: null }
     },

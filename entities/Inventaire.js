@@ -1,73 +1,80 @@
+// entities/Inventaire.js
 const { EntitySchema } = require("typeorm");
 
-const Inventaire = new EntitySchema({
-  name: "Inventaire",
-  tableName: "inventaires",
+const InventaireItem = new EntitySchema({
+  name: "InventaireItem",
+  tableName: "inventaire_items",
   columns: {
-    id: { primary: true, type: "int", generated: true },
-    numeroInventaire: {
-      type: "varchar",
-      unique: true,
-      default: () =>
-        `INV-${new Date().getFullYear()}-${Math.floor(Math.random() * 10000)
-          .toString()
-          .padStart(4, "0")}`,
-    },
-    dateInventaire: {
+    id: { type: "int", primary: true, generated: true },
+    inventaire_id: { type: "int", nullable: true },
+    article_id: { type: "int", nullable: true },
+    qte_reel: { type: "int", nullable: true },
+    pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
+    pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
+    tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
+    total_tva: { type: "decimal", precision: 12, scale: 3, nullable: true },
+    total_ht: { type: "decimal", precision: 12, scale: 3, nullable: true },
+    total_ttc: { type: "decimal", precision: 12, scale: 3, nullable: true },
+    created_at: { type: "timestamp", default: () => "CURRENT_TIMESTAMP" },
+    updated_at: {
       type: "timestamp",
       default: () => "CURRENT_TIMESTAMP",
+      onUpdate: "CURRENT_TIMESTAMP",
     },
-    notes: { type: "text", nullable: true },
-    totalArticles: { type: "int", default: 0 },
-    createdAt: { type: "timestamp", createDate: true },
-    updatedAt: { type: "timestamp", updateDate: true },
-  },
-  relations: {
-    articles: {
-      type: "one-to-many",
-      target: "InventaireArticle",
-      inverseSide: "inventaire",
-      cascade: true,
-    },
-  },
-});
-
-const InventaireArticle = new EntitySchema({
-  name: "InventaireArticle",
-  tableName: "inventaire_articles",
-  columns: {
-    id: { primary: true, type: "int", generated: true },
-    quantite: { type: "int" }, // Just one quantity field as requested
-    prixAchatHT: { type: "decimal", precision: 10, scale: 3, nullable: true },
-    prixAchatTTC: { type: "decimal", precision: 10, scale: 3, nullable: true },
-    tva: {
-      type: "decimal",
-      precision: 7,
-      scale: 3,
-      nullable: true,
-      default: null,
-    },
-    isConsigne: { type: "boolean", default: false },
-    montantHT: { type: "decimal", precision: 12, scale: 3, default: 0 },
-    montantTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
-    montantTVA: { type: "decimal", precision: 12, scale: 3, default: 0 },
   },
   relations: {
     inventaire: {
       type: "many-to-one",
       target: "Inventaire",
       joinColumn: { name: "inventaire_id" },
+      nullable: true,
     },
     article: {
       type: "many-to-one",
       target: "Article",
-      eager: true,
       joinColumn: { name: "article_id" },
+      eager: true,
+      nullable: true,
     },
   },
 });
 
-module.exports = {
-  Inventaire,
-  InventaireArticle,
-};
+const Inventaire = new EntitySchema({
+  name: "Inventaire",
+  tableName: "inventaires",
+  columns: {
+    id: { type: "int", primary: true, generated: true },
+    numero: { type: "varchar", unique: true, nullable: true },
+    date: { type: "date", nullable: true },
+    date_inventaire: { type: "date", nullable: true },
+    description: { type: "text", nullable: true },
+    depot: { type: "varchar", nullable: true }, // CHANGED FROM ENUM TO VARCHAR
+    status: {
+      type: "enum",
+      enum: ["En cours", "Terminé", "Annulé"],
+      default: "Terminé",
+      nullable: true,
+    },
+    total_ht: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    total_ttc: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    total_tva: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    article_count: { type: "int", default: 0 },
+    created_at: { type: "timestamp", default: () => "CURRENT_TIMESTAMP" },
+    updated_at: {
+      type: "timestamp",
+      default: () => "CURRENT_TIMESTAMP",
+      onUpdate: "CURRENT_TIMESTAMP",
+    },
+  },
+  relations: {
+    items: {
+      type: "one-to-many",
+      target: "InventaireItem",
+      inverseSide: "inventaire",
+      cascade: true,
+    },
+    
+  },
+});
+
+module.exports = { Inventaire, InventaireItem };

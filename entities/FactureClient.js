@@ -29,7 +29,7 @@ const FactureClient = new EntitySchema({
     notes: { type: "text", nullable: true },
     modeReglement: {
       type: "enum",
-      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre"],
+      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre" , "especes"],
       nullable: true,
     },
     montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
@@ -98,6 +98,14 @@ const FactureClient = new EntitySchema({
       cascade: true,
       eager: true,
     },
+    bonCommandeClient: {
+      type: "many-to-one",
+      target: "BonCommandeClient",
+      joinColumn: { name: "bonCommandeClient_id" },
+      nullable: true,
+      onDelete: "SET NULL",
+      eager: true,
+    },
     vendeur: {
       type: "many-to-one",
       target: "Vendeur",
@@ -105,6 +113,12 @@ const FactureClient = new EntitySchema({
       joinColumn: { name: "vendeur_id" },
       nullable: true,
     },
+    venteComptoire: {
+      type: "many-to-one",
+      target: "VenteComptoire",
+      nullable: true,
+      joinColumn: { name: "vente_comptoire_id" }
+  },
   },
 });
 

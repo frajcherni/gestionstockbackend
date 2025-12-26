@@ -66,6 +66,7 @@ exports.createVenteComptoire = async (req, res) => {
     let subTotal = 0;
     let totalTax = 0;
     let grandTotal = 0;
+    let totalFodec = 0; // ✅ ADD FODEC TOTAL
 
     for (const item of articles) {
       const article = await articleRepo.findOneBy({
@@ -87,24 +88,49 @@ exports.createVenteComptoire = async (req, res) => {
       const tvaRate =
         item.tva != null ? parseFloat(item.tva) : article.tva || 0;
       let prixUnitaire = parseFloat(item.prix_unitaire);
+      const hasFodec = item.fodec || false; // ✅ GET FODEC FLAG FROM REQUEST
 
-      // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
+      // CALCULATE prix_ttc WITH FODEC FORMULA
       let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
+      
       if (!prix_ttc) {
-        // If prix_ttc not provided, calculate it from prix_unitaire and TVA
-        prix_ttc = prixUnitaire * (1 + tvaRate / 100);
+        // ✅ ADD FODEC CALCULATION HERE
+        if (hasFodec) {
+          // Tunisian FODEC formula: TTC = HT + FODEC + TVA where TVA = (HT + FODEC) × TVA%
+          const fodecAmount = prixUnitaire * 0.01;
+          const baseTVA = prixUnitaire + fodecAmount;
+          const tvaAmount = baseTVA * (tvaRate / 100);
+          prix_ttc = parseFloat((prixUnitaire + fodecAmount + tvaAmount).toFixed(3));
+        } else {
+          // Original logic without FODEC
+          prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+        }
       } else {
-        // If prix_ttc is provided, ensure prix_unitaire is consistent
+        // ✅ ADD FODEC AWARE LOGIC WHEN prix_ttc IS PROVIDED
         if (taxMode === "TTC") {
-          prixUnitaire = prix_ttc / (1 + tvaRate / 100);
+          if (hasFodec) {
+            // Calculate HT from TTC with FODEC: HT = TTC / (1.01 * (1 + TVA%))
+            const coefficient = 1.01 * (1 + tvaRate / 100);
+            prixUnitaire = parseFloat((prix_ttc / coefficient).toFixed(3));
+          } else {
+            // Original logic without FODEC
+            prixUnitaire = parseFloat((prix_ttc / (1 + tvaRate / 100)).toFixed(3));
+          }
         }
       }
 
       const quantite = parseInt(item.quantite);
       const remiseRate = item.remise ? parseFloat(item.remise) : 0;
       const montantHTLigne = quantite * prixUnitaire * (1 - remiseRate / 100);
-      const montantTTCLigne = quantite * prix_ttc; // Use prix_ttc for TTC calculation
+      const montantTTCLigne = quantite * prix_ttc;
       const taxAmount = montantTTCLigne - montantHTLigne;
+      
+      // ✅ ADD FODEC AMOUNT CALCULATION
+      let fodecAmount = 0;
+      if (hasFodec) {
+        fodecAmount = prixUnitaire * 0.01 * quantite;
+        totalFodec += fodecAmount;
+      }
 
       subTotal += montantHTLigne;
       totalTax += taxAmount;
@@ -114,7 +140,8 @@ exports.createVenteComptoire = async (req, res) => {
         article,
         quantite,
         prixUnitaire,
-        prix_ttc: prix_ttc, // SAVE prix_ttc IN DATABASE
+        prix_ttc: prix_ttc,
+        fodec: hasFodec, // ✅ SAVE FODEC FLAG IN DATABASE
         tva: tvaRate,
         remise: remiseRate || null,
       };
@@ -134,10 +161,10 @@ exports.createVenteComptoire = async (req, res) => {
       ...result,
       subTotal: subTotal.toFixed(3),
       totalTax: totalTax.toFixed(3),
+      totalFodec: totalFodec.toFixed(3), // ✅ ADD FODEC TO RESPONSE
       grandTotal: grandTotal.toFixed(3),
       totalAfterRemise: totalAfterRemise.toFixed(3),
     });
-    console.log("Total After Remise saved:", totalAfterRemise);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
@@ -181,13 +208,14 @@ exports.updateVenteComptoire = async (req, res) => {
       updates.espaceNotes = req.body.espaceNotes;
 
     // CALCULATE AND SAVE totalAfterRemise IN UPDATE
+    let grandTotal = 0;
+    let totalFodec = 0; // ✅ ADD FODEC TOTAL
+
     if (
       req.body.remise !== undefined ||
       req.body.remiseType ||
       req.body.articles
     ) {
-      let grandTotal = 0;
-
       // Recalculate grand total from articles
       if (req.body.articles && Array.isArray(req.body.articles)) {
         for (const item of req.body.articles) {
@@ -195,16 +223,31 @@ exports.updateVenteComptoire = async (req, res) => {
           const tvaRate = item.tva ? parseFloat(item.tva) : 0;
           const remiseRate = item.remise ? parseFloat(item.remise) : 0;
           const quantite = parseInt(item.quantite);
+          const hasFodec = item.fodec || false; // ✅ GET FODEC FLAG
 
-          // CALCULATE prix_ttc FROM prix_unitaire AND TVA
-          const prix_ttc = item.prix_ttc
-            ? parseFloat(item.prix_ttc)
-            : prixUnitaire * (1 + tvaRate / 100);
+          // ✅ CALCULATE prix_ttc WITH FODEC FORMULA
+          let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
+          
+          if (!prix_ttc) {
+            if (hasFodec) {
+              const fodecAmount = prixUnitaire * 0.01;
+              const baseTVA = prixUnitaire + fodecAmount;
+              const tvaAmount = baseTVA * (tvaRate / 100);
+              prix_ttc = parseFloat((prixUnitaire + fodecAmount + tvaAmount).toFixed(3));
+            } else {
+              prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+            }
+          }
 
           const montantHTLigne =
             quantite * prixUnitaire * (1 - remiseRate / 100);
-          const montantTTCLigne = quantite * prix_ttc; // Use prix_ttc for TTC calculation
+          const montantTTCLigne = quantite * prix_ttc;
           grandTotal += montantTTCLigne;
+          
+          // ✅ CALCULATE FODEC AMOUNT
+          if (hasFodec) {
+            totalFodec += prixUnitaire * 0.01 * quantite;
+          }
         }
       } else {
         // Use existing articles if not provided in update
@@ -215,6 +258,11 @@ exports.updateVenteComptoire = async (req, res) => {
             item.quantite *
             (item.prix_ttc || item.prixUnitaire * (1 + (item.tva || 0) / 100));
           grandTotal += montantTTCLigne;
+          
+          // ✅ CALCULATE FODEC FROM EXISTING ARTICLES
+          if (item.fodec) {
+            totalFodec += item.prixUnitaire * 0.01 * item.quantite;
+          }
         });
       }
 
@@ -285,10 +333,21 @@ exports.updateVenteComptoire = async (req, res) => {
 
         const prixUnitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
-        // CALCULATE prix_ttc FROM prix_unitaire AND TVA
-        const prix_ttc = item.prix_ttc
-          ? parseFloat(item.prix_ttc)
-          : prixUnitaire * (1 + tvaRate / 100);
+        const hasFodec = item.fodec || false; // ✅ GET FODEC FLAG
+        
+        // ✅ CALCULATE prix_ttc WITH FODEC FORMULA
+        let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
+        
+        if (!prix_ttc) {
+          if (hasFodec) {
+            const fodecAmount = prixUnitaire * 0.01;
+            const baseTVA = prixUnitaire + fodecAmount;
+            const tvaAmount = baseTVA * (tvaRate / 100);
+            prix_ttc = parseFloat((prixUnitaire + fodecAmount + tvaAmount).toFixed(3));
+          } else {
+            prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+          }
+        }
 
         const existing = await venteArticleRepo.findOne({
           where: {
@@ -302,7 +361,8 @@ exports.updateVenteComptoire = async (req, res) => {
           // Update existing line
           existing.quantite = parseInt(item.quantite);
           existing.prixUnitaire = prixUnitaire;
-          existing.prix_ttc = prix_ttc; // UPDATE prix_ttc
+          existing.prix_ttc = prix_ttc;
+          existing.fodec = hasFodec; // ✅ UPDATE FODEC FLAG
           existing.tva = tvaRate;
           existing.remise = item.remise ? parseFloat(item.remise) : null;
           await venteArticleRepo.save(existing);
@@ -313,7 +373,8 @@ exports.updateVenteComptoire = async (req, res) => {
             article,
             quantite: parseInt(item.quantite),
             prixUnitaire,
-            prix_ttc: prix_ttc, // SAVE prix_ttc
+            prix_ttc: prix_ttc,
+            fodec: hasFodec, // ✅ SAVE FODEC FLAG
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           });

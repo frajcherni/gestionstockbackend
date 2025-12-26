@@ -44,6 +44,11 @@ const Article = new EntitySchema({
             joinColumn: { name: "sous_categorie_id" },
             nullable: true
         },
+        stocks: {
+            type: "one-to-many",
+            target: "StockDepot",
+            inverseSide: "article"
+        },
         fournisseur: {
             type: "many-to-one",
             target: "Fournisseur",

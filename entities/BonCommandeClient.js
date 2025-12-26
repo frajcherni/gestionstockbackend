@@ -86,6 +86,13 @@ const BonCommandeClient = new EntitySchema({
       cascade: true,
       eager: true,
     },
+    paiements: {
+      type: "one-to-many",
+      target: "PaiementClient",
+      inverseSide: "bonCommandeClient",
+      cascade: false, // Don't cascade delete
+      eager: false, // Don't auto-load unless requested
+    },
   },
 });
 

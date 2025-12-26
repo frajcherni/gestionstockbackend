@@ -3,6 +3,9 @@ const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
 const { Vendeur } = require("../entities/Vendeur");
 const { BonLivraison } = require("../entities/BonLivraison");
+const { BonCommandeClient } = require("../entities/BonCommandeClient");
+const { VenteComptoire } = require("../entities/VenteComptoire");
+
 const {
   FactureClient,
   FactureClientArticle,
@@ -16,6 +19,9 @@ exports.getAllFacturesClient = async (req, res) => {
         "client",
         "vendeur",
         "bonLivraison",
+        "bonCommandeClient",
+        "venteComptoire", // ADD THIS
+        "bonCommandeClient.paiements", // ADD THIS TOO
         "articles",
         "articles.article",
       ],
@@ -66,7 +72,7 @@ exports.createFactureClient = async (req, res) => {
       totalHT,
       totalTVA,
       totalTTC,
-      totalTTCAfterRemise, // ADD THIS
+      totalTTCAfterRemise,
       notes,
       remise,
       conditionPaiement,
@@ -74,32 +80,33 @@ exports.createFactureClient = async (req, res) => {
       remiseType,
       montantPaye,
       exoneration,
-      // NEW PAYMENT METHODS FIELDS
+      boncommandeclientid, // This is coming from req.body
+      venteComptoire_id, // ADD THIS: For vente comptoire reference
       paymentMethods = [],
       totalPaymentAmount = 0,
       espaceNotes = "",
-      // RETENTION FIELDS - ADD THESE
       montantRetenue = 0,
       hasRetenue = false,
     } = req.body;
-
+  
     const clientRepo = AppDataSource.getRepository(Client);
     const vendeurRepo = AppDataSource.getRepository(Vendeur);
     const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
     const articleRepo = AppDataSource.getRepository(Article);
     const factureRepo = AppDataSource.getRepository(FactureClient);
+    const bonCommandeClientRepo = AppDataSource.getRepository(BonCommandeClient);
+    const venteComptoireRepo = AppDataSource.getRepository(VenteComptoire); // ADD THIS: Import your VenteComptoire repository
 
     // Validate required fields
-    if (
-      !numeroFacture ||
-      !dateFacture ||
-      !client_id 
-    ) {
+    if (!numeroFacture || !dateFacture || !client_id) {
       return res
         .status(400)
         .json({ message: "Les champs obligatoires sont manquants" });
     }
-
+    
+    console.log("boncommandeclientid:", boncommandeclientid);
+    console.log("venteComptoire_id:", venteComptoire_id); // ADD THIS: Debug log
+    
     // Check if numeroFacture is unique
     const existingFacture = await factureRepo.findOne({
       where: { numeroFacture },
@@ -113,6 +120,32 @@ exports.createFactureClient = async (req, res) => {
     const client = await clientRepo.findOneBy({ id: parseInt(client_id) });
     if (!client) {
       return res.status(404).json({ message: "Client non trouvé" });
+    }
+
+    // Check if bonCommandeClient exists
+    let bonCommandeClient = null;
+    if (boncommandeclientid) {
+      bonCommandeClient = await bonCommandeClientRepo.findOneBy({
+        id: parseInt(boncommandeclientid),
+      });
+      if (!bonCommandeClient) {
+        return res
+          .status(404)
+          .json({ message: "Bon de commande client non trouvé" });
+      }
+    }
+
+    // ADD THIS: Check if venteComptoire exists
+    let venteComptoire = null;
+    if (venteComptoire_id) {
+      venteComptoire = await venteComptoireRepo.findOneBy({
+        id: parseInt(venteComptoire_id),
+      });
+      if (!venteComptoire) {
+        return res
+          .status(404)
+          .json({ message: "Vente comptoire non trouvée" });
+      }
     }
 
     let vendeur = null;
@@ -134,45 +167,48 @@ exports.createFactureClient = async (req, res) => {
     }
 
     // Calculate net à payer (after retention)
-    const netAPayer = parseFloat(totalTTCAfterRemise || totalTTC || 0) - parseFloat(montantRetenue || 0);
-    
+    const netAPayer =
+      parseFloat(totalTTCAfterRemise || totalTTC || 0) -
+      parseFloat(montantRetenue || 0);
+
+    // Create the facture object
     const facture = {
       numeroFacture,
       dateFacture: new Date(dateFacture),
       dateEcheance: dateEcheance ? new Date(dateEcheance) : null,
       status: "Validee",
       conditions,
-      client,
-      vendeur,
-      bonLivraison,
-      modeReglement,
+      bonCommandeClient: bonCommandeClient, // Set the relation object
+      venteComptoire: venteComptoire, // ADD THIS: Set venteComptoire relation
+      client: client,
+      vendeur: vendeur,
+      bonLivraison: bonLivraison,
+      modeReglement: modeReglement,
       timbreFiscal: !!timbreFiscal,
       exoneration: !!exoneration,
       conditionPaiement: conditionPaiement || null,
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
       totalTTC: parseFloat(totalTTC || 0),
-      totalTTCAfterRemise: parseFloat(totalTTCAfterRemise || totalTTC || 0), // ADD THIS
+      totalTTCAfterRemise: parseFloat(totalTTCAfterRemise || totalTTC || 0),
       notes: notes || null,
       remise: parseFloat(remise || 0),
       remiseType: remiseType || "percentage",
       montantPaye: parseFloat(montantPaye || 0),
       resteAPayer: Math.max(0, netAPayer - parseFloat(montantPaye || 0)),
-      // NEW PAYMENT METHODS FIELDS
-      paymentMethods: paymentMethods, // Store as JSON
+      paymentMethods: paymentMethods,
       totalPaymentAmount: parseFloat(totalPaymentAmount || 0),
       espaceNotes: espaceNotes || null,
-      // RETENTION FIELDS - ADD THESE
       montantRetenue: parseFloat(montantRetenue || 0),
       hasRetenue: !!hasRetenue,
       articles: [],
     };
 
-    console.log("Creating facture with retention:", {
-      montantRetenue: facture.montantRetenue,
-      hasRetenue: facture.hasRetenue,
-      paymentMethods: facture.paymentMethods,
-      totalPaymentAmount: facture.totalPaymentAmount
+    console.log("Creating facture:", {
+      hasBonCommande: !!bonCommandeClient,
+      bonCommandeClientId: bonCommandeClient ? bonCommandeClient.id : null,
+      hasVenteComptoire: !!venteComptoire, // ADD THIS
+      venteComptoireId: venteComptoire ? venteComptoire.id : null, // ADD THIS
     });
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
@@ -188,19 +224,21 @@ exports.createFactureClient = async (req, res) => {
           .status(404)
           .json({ message: `Article avec ID ${item.article_id} non trouvé` });
       }
-    
+
       if (!item.quantite || !item.prix_unitaire) {
         return res.status(400).json({
           message:
             "Quantité et prix unitaire sont obligatoires pour chaque article",
         });
       }
-    
+
       const prixUnitaire = parseFloat(item.prix_unitaire);
       const tvaRate = item.tva ? parseFloat(item.tva) : 0;
-      
+
       // Calculate prix_ttc based on prix_unitaire and TVA
-      const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
+      const prix_ttc =
+        parseFloat(item.prix_ttc) ||
+        (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
 
       const factureArticle = {
         article: articleEntity,
@@ -216,7 +254,7 @@ exports.createFactureClient = async (req, res) => {
     const result = await factureRepo.save(facture);
     res.status(201).json(result);
   } catch (err) {
-    console.error(err);
+    console.error("Error creating facture:", err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
@@ -296,43 +334,45 @@ exports.updateFactureClient = async (req, res) => {
     }
 
     // Articles
-  // Articles
-if (articles && Array.isArray(articles)) {
-  console.log(articles);
-  const newArticles = [];
-  for (const item of articles) {
-    const articleEntity = await articleRepo.findOneBy({
-      id: parseInt(item.article_id),
-    });
-    if (!articleEntity) {
-      return res
-        .status(404)
-        .json({ message: `Article ${item.article_id} non trouvé` });
+    // Articles
+    if (articles && Array.isArray(articles)) {
+      console.log(articles);
+      const newArticles = [];
+      for (const item of articles) {
+        const articleEntity = await articleRepo.findOneBy({
+          id: parseInt(item.article_id),
+        });
+        if (!articleEntity) {
+          return res
+            .status(404)
+            .json({ message: `Article ${item.article_id} non trouvé` });
+        }
+
+        const prixUnitaire = parseFloat(item.prix_unitaire);
+        const tvaRate = item.tva ? parseFloat(item.tva) : 0;
+
+        // Calculate prix_ttc based on prix_unitaire and TVA
+        // ✅ FIX: Use prix_ttc sent from frontend instead of calculating it
+        const prix_ttc =
+          parseFloat(item.prix_ttc) ||
+          (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
+
+        const factureArticle = {
+          article: articleEntity,
+          quantite: parseInt(item.quantite),
+          prixUnitaire: prixUnitaire,
+          prix_ttc: +prix_ttc.toFixed(3), // Use the TTC value from frontend
+          tva: tvaRate,
+          remise: item.remise ? parseFloat(item.remise) : 0,
+        };
+
+        console.log(factureArticle);
+        newArticles.push(factureArticle);
+      }
+
+      // Remplace les anciens articles → grâce à cascade + onDelete: "CASCADE"
+      facture.articles = newArticles;
     }
-    
-    const prixUnitaire = parseFloat(item.prix_unitaire);
-    const tvaRate = item.tva ? parseFloat(item.tva) : 0;
-    
-    // Calculate prix_ttc based on prix_unitaire and TVA
-  // ✅ FIX: Use prix_ttc sent from frontend instead of calculating it
-const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
-
-const factureArticle = {
-  article: articleEntity,
-  quantite: parseInt(item.quantite),
-  prixUnitaire: prixUnitaire,
-  prix_ttc: +prix_ttc.toFixed(3), // Use the TTC value from frontend
-  tva: tvaRate,
-  remise: item.remise ? parseFloat(item.remise) : 0,
-};
-
-    console.log(factureArticle);
-    newArticles.push(factureArticle);
-  }
-
-  // Remplace les anciens articles → grâce à cascade + onDelete: "CASCADE"
-  facture.articles = newArticles;
-}
 
     // Sauvegarde
     const updatedFacture = await factureRepo.save(facture);
@@ -406,7 +446,9 @@ exports.getNextFactureNumber = async (req, res) => {
     // Get the last numeroFacture for this year
     const lastFacture = await repo
       .createQueryBuilder("fact")
-      .where("fact.numeroFacture LIKE :pattern", { pattern: `${prefix}-%/${year}` })
+      .where("fact.numeroFacture LIKE :pattern", {
+        pattern: `${prefix}-%/${year}`,
+      })
       .orderBy("fact.id", "DESC")
       .getOne();
 
@@ -421,14 +463,14 @@ exports.getNextFactureNumber = async (req, res) => {
     }
 
     // Format number with 3 digits (e.g., 001)
-    const formattedNumber = nextNumber.toString().padStart(3, '0');
+    const formattedNumber = nextNumber.toString().padStart(3, "0");
 
     // Final format: FACTURE-001/2025
     const newNumeroFacture = `${prefix}-${formattedNumber}/${year}`;
 
     res.status(200).json({ numeroFacture: newNumeroFacture });
   } catch (error) {
-    console.error('❌ Error generating facture number:', error);
+    console.error("❌ Error generating facture number:", error);
     res.status(500).json({ message: error.message });
   }
 };
