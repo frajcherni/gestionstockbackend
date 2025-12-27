@@ -1,16 +1,15 @@
-// entities/Inventaire.js
+// entities/Transfer.js
 const { EntitySchema } = require("typeorm");
 
-const InventaireItem = new EntitySchema({
-  name: "InventaireItem",
-  tableName: "inventaire_items",
+const TransferItem = new EntitySchema({
+  name: "TransferItem",
+  tableName: "transfer_items",
   columns: {
     id: { type: "int", primary: true, generated: true },
-    inventaire_id: { type: "int", nullable: true },
-    article_id: { type: "int", nullable: true },
-    qte_avant: { type: "int", nullable: true },      // ✅ ADD THIS: Stock before inventaire
-    qte_reel: { type: "int", nullable: true },       // Counted quantity
-    qte_ajustement: { type: "int", nullable: true },    pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
+    transfer_id: { type: "int" },
+    article_id: { type: "int" },
+    qte: { type: "int", nullable: true },
+    pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
     pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
     tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
     total_tva: { type: "decimal", precision: 12, scale: 3, nullable: true },
@@ -24,10 +23,10 @@ const InventaireItem = new EntitySchema({
     },
   },
   relations: {
-    inventaire: {
+    transfer: {
       type: "many-to-one",
-      target: "Inventaire",
-      joinColumn: { name: "inventaire_id" },
+      target: "Transfer",
+      joinColumn: { name: "transfer_id" },
       nullable: true,
     },
     article: {
@@ -40,20 +39,21 @@ const InventaireItem = new EntitySchema({
   },
 });
 
-const Inventaire = new EntitySchema({
-  name: "Inventaire",
-  tableName: "inventaires",
+const Transfer = new EntitySchema({
+  name: "Transfer",
+  tableName: "transfers",
   columns: {
     id: { type: "int", primary: true, generated: true },
     numero: { type: "varchar", unique: true, nullable: true },
     date: { type: "date", nullable: true },
-    date_inventaire: { type: "date", nullable: true },
+    date_transfert: { type: "date", nullable: true },
     description: { type: "text", nullable: true },
-    depot: { type: "varchar", nullable: true }, // CHANGED FROM ENUM TO VARCHAR
+    depot_source: { type: "varchar", nullable: true },
+    depot_destination: { type: "varchar", nullable: true },
     status: {
       type: "enum",
       enum: ["En cours", "Terminé", "Annulé"],
-      default: "Terminé",
+      default: "En cours",
       nullable: true,
     },
     total_ht: { type: "decimal", precision: 12, scale: 3, default: 0 },
@@ -70,12 +70,11 @@ const Inventaire = new EntitySchema({
   relations: {
     items: {
       type: "one-to-many",
-      target: "InventaireItem",
-      inverseSide: "inventaire",
+      target: "TransferItem",
+      inverseSide: "transfer",
       cascade: true,
     },
-    
   },
 });
 
-module.exports = { Inventaire, InventaireItem };
+module.exports = { Transfer, TransferItem };

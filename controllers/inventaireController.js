@@ -28,8 +28,7 @@ exports.getAllInventaires = async (req, res) => {
         });
     }
 };
-
-// Create new inventaire
+// Create new inventaire (ERP Standard)
 exports.createInventaire = async (req, res) => {
     const queryRunner = AppDataSource.createQueryRunner();
     
@@ -80,7 +79,7 @@ exports.createInventaire = async (req, res) => {
             depot,
             description: description || "",
             status: "Terminé",
-            article_count: articles.length,
+            article_count: 0, // We'll count unique articles
             total_ht: 0,
             total_ttc: 0,
             total_tva: 0
@@ -91,14 +90,47 @@ exports.createInventaire = async (req, res) => {
         let totalHT = 0;
         let totalTVA = 0;
         let totalTTC = 0;
-
-        // Process articles in reverse order
+        
+        // Use a Map to track unique articles and their quantities
+        const articleQuantities = new Map();
+        
+        // First, aggregate quantities by article_id
         for (let i = articles.length - 1; i >= 0; i--) {
             const { article_id, qte_reel } = articles[i];
+            
+            if (articleQuantities.has(article_id)) {
+                // Add to existing quantity
+                articleQuantities.set(article_id, articleQuantities.get(article_id) + qte_reel);
+            } else {
+                // New article
+                articleQuantities.set(article_id, qte_reel);
+            }
+        }
 
+        // Process unique articles
+        for (const [article_id, qte_reel] of articleQuantities) {
             const article = await articleRepo.findOne({ where: { id: article_id } });
             if (!article) {
                 throw new Error(`Article ${article_id} non trouvé`);
+            }
+
+            // ✅ ERP STANDARD: Get current stock before inventaire
+            let stockDepot = await stockRepo.findOne({
+                where: {
+                    article_id: article_id,
+                    depot_id: depotEntity.id
+                }
+            });
+            
+            const qte_avant = stockDepot ? stockDepot.qte : 0;
+            const qte_ajustement = qte_reel - qte_avant; // ERP formula: counted - system
+
+            // ✅ Check for negative stock after adjustment
+            if (stockDepot) {
+                const newQte = stockDepot.qte + qte_ajustement;
+                if (newQte < 0) {
+                    throw new Error(`Article ${article.reference}: Stock insuffisant. Stock actuel: ${stockDepot.qte}, ajustement: ${qte_ajustement}`);
+                }
             }
 
             // Calculate prices
@@ -108,11 +140,13 @@ exports.createInventaire = async (req, res) => {
             const total_tva = total_ht * (tva_rate / 100);
             const total_ttc = total_ht + total_tva;
 
-            // Create inventaire item
+            // ✅ Create inventaire item with before/after quantities
             const inventaireItem = inventaireItemRepo.create({
                 inventaire_id: newInventaire.id,
                 article_id,
-                qte_reel,
+                qte_avant,          // Stock before inventaire
+                qte_reel,           // Counted quantity
+                qte_ajustement,     // Adjustment (could be + or -)
                 pua_ht,
                 pua_ttc: pua_ht * (1 + (tva_rate / 100)),
                 tva: tva_rate,
@@ -128,34 +162,34 @@ exports.createInventaire = async (req, res) => {
             totalTVA += total_tva;
             totalTTC += total_ttc;
 
-            // Update depot stock
-            let stockDepot = await stockRepo.findOne({
-                where: {
-                    article_id: article_id,
-                    depot_id: depotEntity.id
-                }
-            });
-
+            // ✅ ERP STANDARD: Apply adjustment to stock
             if (!stockDepot) {
                 stockDepot = stockRepo.create({
                     article_id: article_id,
                     depot_id: depotEntity.id,
-                    qte: qte_reel
+                    qte: qte_reel // New stock = counted quantity
                 });
             } else {
-                stockDepot.qte = qte_reel;
+                // Apply adjustment: New Stock = Old Stock + Adjustment
+                stockDepot.qte += qte_ajustement;
             }
             
             await stockRepo.save(stockDepot);
-
-            // Update global article quantity
-            const allDepotStocks = await stockRepo.find({ where: { article_id: article_id } });
-            const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + stock.qte, 0);
-            article.qte = totalArticleStock;
-            await articleRepo.save(article);
         }
 
-        // Update inventaire totals
+        // Update global article quantities
+        for (const [article_id, qte_reel] of articleQuantities) {
+            const allDepotStocks = await stockRepo.find({ where: { article_id: article_id } });
+            const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + (stock.qte || 0), 0);
+            
+            await articleRepo.update(
+                { id: article_id },
+                { qte: totalArticleStock }
+            );
+        }
+
+        // Update inventaire counts and totals
+        newInventaire.article_count = articleQuantities.size;
         newInventaire.total_ht = totalHT;
         newInventaire.total_tva = totalTVA;
         newInventaire.total_ttc = totalTTC;
@@ -205,7 +239,7 @@ exports.updateInventaire = async (req, res) => {
         const depotRepo = queryRunner.manager.getRepository(Depot);
         const stockRepo = queryRunner.manager.getRepository(StockDepot);
 
-        // Find existing inventaire
+        // Find existing inventaire with items
         const existingInventaire = await inventaireRepo.findOne({
             where: { id },
             relations: ['items']
@@ -218,9 +252,17 @@ exports.updateInventaire = async (req, res) => {
             });
         }
 
-        // Get depot (existing or new)
-        let depotEntity = await depotRepo.findOne({ 
-            where: { nom: depot || existingInventaire.depot } 
+        // ✅ Block depot change
+        if (depot && depot !== existingInventaire.depot) {
+            return res.status(400).json({
+                success: false,
+                message: "Modification du dépôt non autorisée."
+            });
+        }
+
+        // Get depot (use existing)
+        const depotEntity = await depotRepo.findOne({ 
+            where: { nom: existingInventaire.depot } 
         });
 
         if (!depotEntity) {
@@ -230,28 +272,87 @@ exports.updateInventaire = async (req, res) => {
             });
         }
 
-        // Update basic info
-        if (numero) existingInventaire.numero = numero;
-        if (date) existingInventaire.date = date;
-        if (date_inventaire) existingInventaire.date_inventaire = date_inventaire;
-        if (depot) existingInventaire.depot = depot;
-        if (description !== undefined) existingInventaire.description = description;
-
+        // ================================================
+        // 🚨 ERP CRITICAL LOGIC: CANCEL THEN RECREATE
+        // ================================================
+        
+        // STEP 1: CANCEL existing inventory (reverse all adjustments)
+        const existingItems = existingInventaire.items || [];
+        
+        for (const item of existingItems) {
+            const stockDepot = await stockRepo.findOne({
+                where: {
+                    article_id: item.article_id,
+                    depot_id: depotEntity.id
+                }
+            });
+            
+            if (stockDepot) {
+                // REVERSE the original adjustment
+                // Original: stock += qte_ajustement
+                // Cancel: stock -= qte_ajustement
+                stockDepot.qte -= item.qte_ajustement || 0;
+                await stockRepo.save(stockDepot);
+            }
+            
+            // Update global article quantity for this article
+            const allDepotStocks = await stockRepo.find({ 
+                where: { article_id: item.article_id } 
+            });
+            const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + (stock.qte || 0), 0);
+            
+            await articleRepo.update(
+                { id: item.article_id },
+                { qte: totalArticleStock }
+            );
+        }
+        
+        // Delete all existing inventory items
+        await inventaireItemRepo.delete({ inventaire_id: id });
+        
+        // ================================================
+        // STEP 2: CREATE NEW inventory items
+        // ================================================
+        
         let totalHT = 0;
         let totalTVA = 0;
         let totalTTC = 0;
+        const articleIdsToUpdate = new Set();
 
-        // Update articles if provided
         if (articles && Array.isArray(articles)) {
-            // Delete old items
-            await inventaireItemRepo.delete({ inventaire_id: id });
-
-            // Add new items
+            // Aggregate quantities by article_id (to handle duplicates)
+            const articleQuantities = new Map();
+            
             for (let i = articles.length - 1; i >= 0; i--) {
                 const { article_id, qte_reel } = articles[i];
+                
+                if (articleQuantities.has(article_id)) {
+                    articleQuantities.set(article_id, articleQuantities.get(article_id) + qte_reel);
+                } else {
+                    articleQuantities.set(article_id, qte_reel);
+                }
+            }
 
+            // Process each unique article
+            for (const [article_id, qte_reel] of articleQuantities) {
                 const article = await articleRepo.findOne({ where: { id: article_id } });
                 if (!article) continue;
+
+                articleIdsToUpdate.add(article_id);
+
+                // ✅ Get CURRENT STOCK (after cancellation)
+                const stockDepot = await stockRepo.findOne({
+                    where: {
+                        article_id: article_id,
+                        depot_id: depotEntity.id
+                    }
+                });
+                
+                const currentStockQty = stockDepot ? stockDepot.qte : 0;
+                
+                // Calculate adjustment based on CURRENT stock
+                const qte_avant = currentStockQty;
+                const qte_ajustement = qte_reel - qte_avant;
 
                 // Calculate prices
                 const pua_ht = parseFloat(article.pua_ht) || 0;
@@ -260,11 +361,13 @@ exports.updateInventaire = async (req, res) => {
                 const total_tva = total_ht * (tva_rate / 100);
                 const total_ttc = total_ht + total_tva;
 
-                // Create item
+                // Create new inventory item
                 const inventaireItem = inventaireItemRepo.create({
                     inventaire_id: id,
                     article_id,
+                    qte_avant,
                     qte_reel,
+                    qte_ajustement,
                     pua_ht,
                     pua_ttc: pua_ht * (1 + (tva_rate / 100)),
                     tva: tva_rate,
@@ -280,43 +383,48 @@ exports.updateInventaire = async (req, res) => {
                 totalTVA += total_tva;
                 totalTTC += total_ttc;
 
-                // Update depot stock
-                let stockDepot = await stockRepo.findOne({
-                    where: {
-                        article_id: article_id,
-                        depot_id: depotEntity.id
-                    }
-                });
-
+                // ✅ Apply new adjustment to stock
                 if (!stockDepot) {
-                    stockDepot = stockRepo.create({
+                    // New article in this depot
+                    const newStock = stockRepo.create({
                         article_id: article_id,
                         depot_id: depotEntity.id,
                         qte: qte_reel
                     });
+                    await stockRepo.save(newStock);
                 } else {
-                    stockDepot.qte = qte_reel;
+                    stockDepot.qte += qte_ajustement;
+                    await stockRepo.save(stockDepot);
                 }
-                
-                await stockRepo.save(stockDepot);
-
-                // Update global article quantity
-                const allDepotStocks = await stockRepo.find({ where: { article_id: article_id } });
-                const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + stock.qte, 0);
-                article.qte = totalArticleStock;
-                await articleRepo.save(article);
             }
 
-            existingInventaire.article_count = articles.length;
+            existingInventaire.article_count = articleQuantities.size;
         }
 
-        // Update totals
+        // Update inventaire header
         existingInventaire.total_ht = totalHT;
         existingInventaire.total_tva = totalTVA;
         existingInventaire.total_ttc = totalTTC;
         existingInventaire.updated_at = new Date();
+        
+        // Update other fields if provided
+        if (numero) existingInventaire.numero = numero;
+        if (date) existingInventaire.date = date;
+        if (date_inventaire) existingInventaire.date_inventaire = date_inventaire;
+        if (description !== undefined) existingInventaire.description = description;
 
         await inventaireRepo.save(existingInventaire);
+
+        // UPDATE GLOBAL ARTICLE QUANTITIES
+        for (const articleId of articleIdsToUpdate) {
+            const allDepotStocks = await stockRepo.find({ where: { article_id: articleId } });
+            const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + (stock.qte || 0), 0);
+            
+            await articleRepo.update(
+                { id: articleId },
+                { qte: totalArticleStock }
+            );
+        }
 
         await queryRunner.commitTransaction();
 
@@ -329,7 +437,7 @@ exports.updateInventaire = async (req, res) => {
         res.status(200).json({
             success: true,
             data: updatedInventaire,
-            message: "Inventaire mis à jour avec succès"
+            message: "Inventaire mis à jour avec succès (ERP logique: annulation + recréation)"
         });
 
     } catch (error) {
@@ -343,28 +451,12 @@ exports.updateInventaire = async (req, res) => {
         await queryRunner.release();
     }
 };
-
-// Delete inventaire
-// Delete inventaire
+// Delete inventaire (ERP Standard - Reverse Adjustment)
 exports.deleteInventaire = async (req, res) => {
     const queryRunner = AppDataSource.createQueryRunner();
     
     try {
         const { id } = req.params;
-
-        console.log("Delete request received:", { 
-            paramsId: id, 
-            idType: typeof id 
-        });
-
-        // Convert id to number
-        const inventaireId = parseInt(id);
-        if (isNaN(inventaireId)) {
-            return res.status(400).json({
-                success: false,
-                message: "ID d'inventaire invalide"
-            });
-        }
 
         await queryRunner.connect();
         await queryRunner.startTransaction();
@@ -375,18 +467,16 @@ exports.deleteInventaire = async (req, res) => {
         const depotRepo = queryRunner.manager.getRepository(Depot);
         const stockRepo = queryRunner.manager.getRepository(StockDepot);
 
-        // Find inventaire - use parsed integer ID
+        // Find inventaire with items
         const inventaire = await inventaireRepo.findOne({
-            where: { id: inventaireId },
+            where: { id },
             relations: ['items']
         });
-
-        console.log("Found inventaire to delete:", inventaire);
 
         if (!inventaire) {
             return res.status(404).json({
                 success: false,
-                message: `Inventaire avec ID ${inventaireId} non trouvé`
+                message: "Inventaire non trouvé"
             });
         }
 
@@ -395,58 +485,60 @@ exports.deleteInventaire = async (req, res) => {
             where: { nom: inventaire.depot } 
         });
 
-        console.log("Found depot for deletion:", depotEntity);
-
-        // Update stock (set to 0)
-        if (depotEntity && inventaire.items) {
-            console.log("Processing items for stock update:", inventaire.items.length);
-            
-            for (const item of inventaire.items) {
-                console.log(`Processing item ${item.id} for article ${item.article_id}`);
-                
-                let stockDepot = await stockRepo.findOne({
-                    where: {
-                        article_id: item.article_id,
-                        depot_id: depotEntity.id
-                    }
-                });
-
-                if (stockDepot) {
-                    stockDepot.qte = 0;
-                    await stockRepo.save(stockDepot);
-                    console.log(`Set stock to 0 for article ${item.article_id} in depot ${depotEntity.nom}`);
-                } else {
-                    console.log(`No stock found for article ${item.article_id} in depot ${depotEntity.nom}`);
-                }
-
-                // Update global article quantity
-                const article = await articleRepo.findOne({ where: { id: item.article_id } });
-                if (article) {
-                    const allDepotStocks = await stockRepo.find({ where: { article_id: item.article_id } });
-                    const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + stock.qte, 0);
-                    article.qte = totalArticleStock;
-                    await articleRepo.save(article);
-                    console.log(`Updated global qte for article ${item.article_id} to ${totalArticleStock}`);
-                }
-            }
-        } else {
-            console.log("No depot or items found for this inventaire");
+        if (!depotEntity) {
+            return res.status(400).json({
+                success: false,
+                message: "Dépôt non trouvé"
+            });
         }
 
-        // Delete items
-        const deletedItems = await inventaireItemRepo.delete({ inventaire_id: inventaireId });
-        console.log(`Deleted ${deletedItems.affected} inventaire items`);
+        // ✅ ERP STANDARD: Reverse adjustments for each item
+        for (const item of inventaire.items || []) {
+            const stockDepot = await stockRepo.findOne({
+                where: {
+                    article_id: item.article_id,
+                    depot_id: depotEntity.id
+                }
+            });
+
+            if (stockDepot) {
+                // ✅ Reverse the adjustment: Current Stock - Adjustment
+                stockDepot.qte -= item.qte_ajustement || 0;
+                
+                // Check for negative stock (shouldn't happen if system is consistent)
+                if (stockDepot.qte < 0) {
+                    throw new Error(`Article ${item.article_id}: Annulation impossible - stock deviendrait négatif`);
+                }
+                
+                // If stock becomes 0 and was created by this inventaire, delete it
+                if (stockDepot.qte === 0 && item.qte_avant === 0) {
+                    await stockRepo.delete({ id: stockDepot.id });
+                } else {
+                    await stockRepo.save(stockDepot);
+                }
+            }
+            
+            // Update global article quantity
+            const allDepotStocks = await stockRepo.find({ where: { article_id: item.article_id } });
+            const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + (stock.qte || 0), 0);
+            
+            await articleRepo.update(
+                { id: item.article_id },
+                { qte: totalArticleStock }
+            );
+        }
+
+        // Delete inventaire items
+        await inventaireItemRepo.delete({ inventaire_id: id });
         
         // Delete inventaire
-        await inventaireRepo.delete(inventaireId);
-        console.log(`Deleted inventaire ${inventaireId}`);
+        await inventaireRepo.delete(id);
 
         await queryRunner.commitTransaction();
-        console.log("Delete transaction committed");
 
         res.status(200).json({
             success: true,
-            message: `Inventaire ${inventaire.numero} supprimé avec succès`
+            message: "Inventaire supprimé avec succès"
         });
 
     } catch (error) {
@@ -454,7 +546,7 @@ exports.deleteInventaire = async (req, res) => {
         console.error("Error deleting inventaire:", error);
         res.status(500).json({
             success: false,
-            message: "Erreur lors de la suppression de l'inventaire"
+            message: error.message || "Erreur lors de la suppression de l'inventaire"
         });
     } finally {
         await queryRunner.release();

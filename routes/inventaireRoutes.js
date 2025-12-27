@@ -28,7 +28,7 @@ router.get('/getAllInventaires', getAllInventaires);
 router.post('/createInventaire', createInventaire);
 
 // Update inventaire
-router.put('/updateInventaire/:id', updateInventaire);
+router.put('/update/:id', updateInventaire);
 
 // Delete inventaire
 router.delete('/deleteInventaire/:id', deleteInventaire);

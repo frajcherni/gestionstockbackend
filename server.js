@@ -23,6 +23,8 @@ const TresorieRoutes = require("./routes/TresorieRoutes");
 const paiementClientRoutes = require("./routes/paiementClientRoutes");
 const inventaireRoutes = require("./routes/inventaireRoutes");
 const depotRoutes = require("./routes/depotRoutes");
+const TransfertRoutes = require("./routes/TransfertRoutes");
+
 
 
 // Use the routes
@@ -68,6 +70,8 @@ app.use("/api/getpayment", TresorieRoutes);
 
 app.use("/api/paiements-client", paiementClientRoutes);
 app.use("/api/inventaire", inventaireRoutes);
+app.use("/api/Transfert", TransfertRoutes);
+
 app.use("/api/depots", depotRoutes);
 
 
