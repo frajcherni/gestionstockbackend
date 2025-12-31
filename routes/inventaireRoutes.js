@@ -9,11 +9,14 @@ const {
     getNextInventaireNumber,
     getInventaireStats,
     searchInventaires,
-    getInventairesByDateRange
+    getInventairesByDateRange,
+    getNextInventaireNumberEnhanced
 } = require('../controllers/inventaireController');
 
 // Get all inventaires
+router.get('/getNextInventaireNumberEnhanced', getNextInventaireNumberEnhanced);
 router.get('/getAllInventaires', getAllInventaires);
+
 
 // Search inventaires
 //router.get('/search', searchInventaires);

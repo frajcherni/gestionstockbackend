@@ -9,7 +9,8 @@ const InventaireItem = new EntitySchema({
     inventaire_id: { type: "int", nullable: true },
     article_id: { type: "int", nullable: true },
     qte_avant: { type: "int", nullable: true },      // ✅ ADD THIS: Stock before inventaire
-    qte_reel: { type: "int", nullable: true },       // Counted quantity
+    qte_reel: { type: "int", nullable: true },  
+    ligne_numero: { type: "int", nullable: true },     // Counted quantity
     qte_ajustement: { type: "int", nullable: true },    pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
     pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
     tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
