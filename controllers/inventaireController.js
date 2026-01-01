@@ -4,6 +4,7 @@ const { Article } = require("../entities/Article");
 const { Depot } = require("../entities/Depot");
 const { StockDepot } = require("../entities/StockDepot");
 const { AppDataSource } = require("../db");
+const { In } = require('typeorm');
 
 // Get all inventaires
 exports.getAllInventaires = async (req, res) => {
@@ -35,7 +36,8 @@ exports.createInventaire = async (req, res) => {
     try {
         const { numero, date, date_inventaire, depot, description, articles } = req.body;
 
-        if (!numero || !date || !date_inventaire || !depot || !articles || !Array.isArray(articles) || articles.length === 0) {
+        // Validation
+        if (!numero || !date || !date_inventaire || !depot || !articles || !Array.isArray(articles)) {
             return res.status(400).json({
                 success: false,
                 message: "Données invalides"
@@ -51,7 +53,7 @@ exports.createInventaire = async (req, res) => {
         const depotRepo = queryRunner.manager.getRepository(Depot);
         const stockRepo = queryRunner.manager.getRepository(StockDepot);
 
-        // Check if inventaire number exists
+        // 1. Check if inventaire exists
         const existingInventaire = await inventaireRepo.findOne({ where: { numero } });
         if (existingInventaire) {
             return res.status(400).json({
@@ -60,7 +62,7 @@ exports.createInventaire = async (req, res) => {
             });
         }
 
-        // Get depot
+        // 2. Get depot
         const depotEntity = await depotRepo.findOne({ where: { nom: depot } });
         if (!depotEntity) {
             return res.status(400).json({
@@ -69,7 +71,7 @@ exports.createInventaire = async (req, res) => {
             });
         }
 
-        // Create inventaire
+        // 3. Create inventaire header
         const newInventaire = inventaireRepo.create({
             numero,
             date,
@@ -77,7 +79,7 @@ exports.createInventaire = async (req, res) => {
             depot,
             description: description || "",
             status: "Terminé",
-            article_count: articles.length, // Nombre total de lignes (avec doublons)
+            article_count: articles.length,
             total_ht: 0,
             total_ttc: 0,
             total_tva: 0
@@ -85,155 +87,123 @@ exports.createInventaire = async (req, res) => {
 
         await inventaireRepo.save(newInventaire);
 
-        let totalHT = 0;
-        let totalTVA = 0;
-        let totalTTC = 0;
+        // 4. Process articles - SIMPLIFIED LOGIC
+        const processedArticles = new Map(); // article_id -> {qte_avant, qte_reel_total}
+        const articleDetails = new Map(); // article_id -> article details
         
-        // Map pour calculer les quantités totales par article (agrégation)
-        const articleTotals = new Map(); // article_id -> { totalQte: 0, items: [] }
-        const articleIdsToUpdate = new Set();
-
-        // ================================================
-        // ÉTAPE 1: Traiter chaque ligne individuellement et calculer les totaux
-        // ================================================
+        // First pass: collect totals and pre-fetch articles
         for (const item of articles) {
-            const { article_id, qte_reel, ligne_numero } = item;
+            const { article_id, qte_reel } = item;
             
-            const article = await articleRepo.findOne({ where: { id: article_id } });
-            if (!article) {
-                throw new Error(`Article ${article_id} non trouvé`);
-            }
-
-            // Calculer les prix pour cette ligne
-            const pua_ht = parseFloat(article.pua_ht) || 0;
-            const tva_rate = parseFloat(article.tva) || 19;
-            const total_ht = pua_ht * qte_reel;
-            const total_tva = total_ht * (tva_rate / 100);
-            const total_ttc = total_ht + total_tva;
-
-            // Ajouter aux totaux globaux
-            totalHT += total_ht;
-            totalTVA += total_tva;
-            totalTTC += total_ttc;
-
-            // Sauvegarder l'item d'inventaire avec son ligne_numero
-            const inventaireItem = inventaireItemRepo.create({
-                inventaire_id: newInventaire.id,
-                article_id,
-                ligne_numero: ligne_numero || 0,
-                qte_avant: 0, // Sera mis à jour après
-                qte_reel,
-                qte_ajustement: 0, // Sera calculé après
-                pua_ht,
-                pua_ttc: pua_ht * (1 + (tva_rate / 100)),
-                tva: tva_rate,
-                total_tva,
-                total_ht,
-                total_ttc
-            });
-
-            await inventaireItemRepo.save(inventaireItem);
-
-            // Ajouter à la map pour agrégation
-            if (!articleTotals.has(article_id)) {
-                articleTotals.set(article_id, {
-                    totalQte: 0,
+            if (!processedArticles.has(article_id)) {
+                processedArticles.set(article_id, {
+                    qte_reel_total: 0,
                     items: []
                 });
             }
             
-            const articleData = articleTotals.get(article_id);
-            articleData.totalQte += qte_reel;
-            articleData.items.push({
-                itemId: inventaireItem.id,
-                qte_reel: qte_reel
-            });
-            
-            articleIdsToUpdate.add(article_id);
+            const data = processedArticles.get(article_id);
+            data.qte_reel_total += qte_reel;
+            data.items.push(item);
         }
 
-        // ================================================
-        // ÉTAPE 2: Mettre à jour le stock des dépôts (agrégation des quantités)
-        // ================================================
-        for (const [articleId, articleData] of articleTotals) {
-            const totalQteReel = articleData.totalQte;
-            
-            // Obtenir le stock actuel
-            let stockDepot = await stockRepo.findOne({
-                where: {
-                    article_id: articleId,
-                    depot_id: depotEntity.id
-                }
-            });
-            
-            const qteAvant = stockDepot ? stockDepot.qte : 0;
-            const qteAjustementTotal = totalQteReel - qteAvant;
+        // Get current stock for all articles at once
+        const articleIds = Array.from(processedArticles.keys());
+        const stocks = await stockRepo.find({
+            where: {
+                article_id: In(articleIds),
+                depot_id: depotEntity.id
+            }
+        });
 
-            // Vérifier le stock négatif
-            if (stockDepot) {
-                const newQte = stockDepot.qte + qteAjustementTotal;
-                if (newQte < 0) {
-                    throw new Error(`Article ${articleId}: Stock insuffisant. Stock actuel: ${stockDepot.qte}, ajustement: ${qteAjustementTotal}`);
-                }
+        const stocksMap = new Map();
+        stocks.forEach(stock => {
+            stocksMap.set(stock.article_id, stock.qte);
+        });
+
+        // Get article details
+        const articlesData = await articleRepo.findByIds(articleIds);
+        articlesData.forEach(article => {
+            articleDetails.set(article.id, article);
+        });
+
+        // 5. Process each article group
+        let totalHT = 0;
+        let totalTVA = 0;
+        let totalTTC = 0;
+        
+        for (const [articleId, data] of processedArticles) {
+            const article = articleDetails.get(articleId);
+            if (!article) {
+                console.error(`Article ${articleId} non trouvé`);
+                continue;
             }
 
-            // Mettre à jour ou créer le stock du dépôt
-            if (!stockDepot) {
-                stockDepot = stockRepo.create({
+            const currentStock = stocksMap.get(articleId) || 0;
+            const qteReelTotal = data.qte_reel_total;
+            
+            // Calculate adjustment (SIMPLIFIED - no fractional quantities)
+            const qteAjustementTotal = qteReelTotal - currentStock;
+
+            // Update stock
+            if (stocksMap.has(articleId)) {
+                await stockRepo.update(
+                    { article_id: articleId, depot_id: depotEntity.id },
+                    { qte: qteReelTotal }
+                );
+            } else {
+                await stockRepo.save({
                     article_id: articleId,
                     depot_id: depotEntity.id,
-                    qte: totalQteReel
+                    qte: qteReelTotal
                 });
-            } else {
-                stockDepot.qte = totalQteReel; // Définir directement la quantité comptée
             }
-            
-            await stockRepo.save(stockDepot);
 
-            // ================================================
-            // ÉTAPE 3: Mettre à jour qte_avant et qte_ajustement dans chaque ligne
-            // ================================================
-            // Pour chaque item de cet article, répartir le qte_avant proportionnellement
-            for (const itemData of articleData.items) {
-                // Calculer la proportion pour cet item
-                const proportion = itemData.qte_reel / totalQteReel;
-                const qteAvantForItem = qteAvant * proportion;
-                const qteAjustementForItem = itemData.qte_reel - qteAvantForItem;
+            // Create inventory items
+            for (const item of data.items) {
+                const pua_ht = parseFloat(article.pua_ht) || 0;
+                const tva_rate = parseFloat(article.tva) || 19;
+                const line_qte = item.qte_reel;
+                const line_total_ht = pua_ht * line_qte;
+                const line_total_tva = line_total_ht * (tva_rate / 100);
+                const line_total_ttc = line_total_ht + line_total_tva;
 
-                // Mettre à jour l'item d'inventaire
-                await inventaireItemRepo.update(
-                    { id: itemData.itemId },
-                    {
-                        qte_avant: qteAvantForItem,
-                        qte_ajustement: qteAjustementForItem
-                    }
-                );
+                // Distribute qte_avant proportionally but use Math.round
+                const proportion = line_qte / qteReelTotal;
+                const qte_avant = Math.round(currentStock * proportion);
+                const qte_ajustement = line_qte - qte_avant;
+
+                await inventaireItemRepo.save({
+                    inventaire_id: newInventaire.id,
+                    article_id: articleId,
+                    ligne_numero: item.ligne_numero || 0,
+                    qte_avant: qte_avant,
+                    qte_reel: line_qte,
+                    qte_ajustement: qte_ajustement,
+                    pua_ht: pua_ht,
+                    pua_ttc: pua_ht * (1 + (tva_rate / 100)),
+                    tva: tva_rate,
+                    total_tva: line_total_tva,
+                    total_ht: line_total_ht,
+                    total_ttc: line_total_ttc
+                });
+
+                totalHT += line_total_ht;
+                totalTVA += line_total_tva;
+                totalTTC += line_total_ttc;
             }
         }
 
-        // ================================================
-        // ÉTAPE 4: Mettre à jour les quantités globales des articles
-        // ================================================
-        for (const articleId of articleIdsToUpdate) {
-            const allDepotStocks = await stockRepo.find({ where: { article_id: articleId } });
-            const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + (stock.qte || 0), 0);
-            
-            await articleRepo.update(
-                { id: articleId },
-                { qte: totalArticleStock }
-            );
-        }
-
-        // Mettre à jour les totaux de l'inventaire
+        // 6. Update inventaire totals
         newInventaire.total_ht = totalHT;
         newInventaire.total_tva = totalTVA;
         newInventaire.total_ttc = totalTTC;
         await inventaireRepo.save(newInventaire);
 
-        // Commit transaction
+        // 7. Commit
         await queryRunner.commitTransaction();
 
-        // Return created inventaire
+        // Return response
         const completeInventaire = await inventaireRepo.findOne({
             where: { id: newInventaire.id },
             relations: ['items', 'items.article']
@@ -247,10 +217,23 @@ exports.createInventaire = async (req, res) => {
 
     } catch (error) {
         await queryRunner.rollbackTransaction();
-        console.error("Error creating inventaire:", error);
+        
+        // Log specific database errors
+        if (error.code === 'ER_LOCK_WAIT_TIMEOUT' || error.code === 'ER_LOCK_DEADLOCK') {
+            console.error("Database lock timeout - transaction too long");
+        }
+        
+        console.error("Full error:", {
+            message: error.message,
+            code: error.code,
+            sqlState: error.sqlState,
+            stack: error.stack
+        });
+        
         res.status(500).json({
             success: false,
-            message: error.message || "Erreur lors de la création de l'inventaire"
+            message: `Erreur technique: ${error.message}`,
+            code: error.code
         });
     } finally {
         await queryRunner.release();
