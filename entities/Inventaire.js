@@ -8,15 +8,18 @@ const InventaireItem = new EntitySchema({
     id: { type: "int", primary: true, generated: true },
     inventaire_id: { type: "int", nullable: true },
     article_id: { type: "int", nullable: true },
-    qte_avant: { type: "int", nullable: true },      // ✅ ADD THIS: Stock before inventaire
-    qte_reel: { type: "int", nullable: true },  
-    ligne_numero: { type: "int", nullable: true },     // Counted quantity
-    qte_ajustement: { type: "int", nullable: true },    pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
-    pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
+    qte_avant: { type: "int", nullable: true }, // ✅ ADD THIS: Stock before inventaire
+    qte_reel: { type: "int", nullable: true },
+    ligne_numero: { type: "int", nullable: true }, // Counted quantity
+    qte_ajustement: { type: "int", nullable: true },
     tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
-    total_tva: { type: "decimal", precision: 12, scale: 3, nullable: true },
-    total_ht: { type: "decimal", precision: 12, scale: 3, nullable: true },
-    total_ttc: { type: "decimal", precision: 12, scale: 3, nullable: true },
+
+    pua_ht: { type: "decimal", precision: 10, scale: 3 },
+    pua_ttc: { type: "decimal", precision: 10, scale: 3 },
+    total_ht: { type: "decimal", precision: 12, scale: 3 },
+    total_ttc: { type: "decimal", precision: 12, scale: 3 },
+    total_tva: { type: "decimal", precision: 12, scale: 3 },
+
     created_at: { type: "timestamp", default: () => "CURRENT_TIMESTAMP" },
     updated_at: {
       type: "timestamp",
@@ -75,7 +78,6 @@ const Inventaire = new EntitySchema({
       inverseSide: "inventaire",
       cascade: true,
     },
-    
   },
 });
 
