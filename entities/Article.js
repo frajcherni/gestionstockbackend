@@ -4,15 +4,16 @@ const Article = new EntitySchema({
     name: "Article",
     tableName: "articles",
     columns: {
-        id: { type: "int", primary: true , generated:true}, // remove generated:true
+        id: { type: "int", primary: true , generated:false}, // remove generated:true
         reference: { type: "varchar", nullable: true },
         designation: { type: "varchar", nullable: true },
         pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
         pua_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
         puv_ht: { type: "decimal", precision: 10, scale: 3, nullable: true },
-        code_barre: { type: "varchar", unique: true, nullable: true }, // NOUVEAU CHAMP
-        code_barre_1: { type: "varchar", nullable: true }, // NOUVEAU CHAMP 1
-        code_barre_2: { type: "varchar", nullable: true }, // NOUVEAU CHAMP 2
+        code_barre: { type: "varchar", unique: false, nullable: true }, // NOUVEAU CHAMP
+        code_barres: { type: "simple-array", nullable: true }, // CHANGÉ: tableau de codes barres
+
+    
         tva: { type: "int", nullable: true },
         puv_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
         type: { type: "varchar", nullable: true },
