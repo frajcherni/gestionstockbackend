@@ -9,7 +9,14 @@ router.post("/createpaiement", paiementClientController.createPaiement);
 router.get("/getAllPaiementsClient", paiementClientController.getAllPaiements);
 
 // Get payments by bon commande ID
-router.get("/bon-commande/:bonCommandeId", paiementClientController.getPaiementsByBonCommande);
+// Get payments by bon commande ID
+
+// Get payments by bon commande ID
+
+router.get(
+  "/bon-commande/:bonCommandeId",
+  paiementClientController.getPaiementsByBonCommande
+);
 
 // Get payment by ID
 //router.get("/:id", paiementClientController.getPaiementById);
@@ -21,6 +28,9 @@ router.put("/updatePaiement/:id", paiementClientController.updatePaiement);
 router.delete("/:id", paiementClientController.deletePaiement);
 
 // Get next payment number
-router.get("/getNextPaiementNumber", paiementClientController.getNextPaiementNumber);
+router.get(
+  "/getNextPaiementNumber",
+  paiementClientController.getNextPaiementNumber
+);
 
 module.exports = router;
