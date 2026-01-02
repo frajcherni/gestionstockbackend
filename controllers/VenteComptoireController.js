@@ -467,34 +467,37 @@ exports.fetchNextVenteComptoireNumber = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(VenteComptoire);
 
-    const lastVente = await repo.findOne({
+    // آخر vente حسب id DESC
+    const lastVenteArr = await repo.find({
       order: { id: "DESC" },
+      take: 1,
     });
+    const lastVente = lastVenteArr[0]; // undefined إذا ما فمّاش record
 
     const currentYear = new Date().getFullYear();
-    const START_SEQ = 1;
-
-    let nextNumber;
+    let nextSeq = 1;
 
     if (lastVente && lastVente.numeroCommande) {
-      // الصيغة: VENTE-0001/2026
       const [ventePart, yearPart] = lastVente.numeroCommande.split("/");
       const lastYear = parseInt(yearPart, 10);
-      const lastSeq = parseInt(ventePart.split("-")[1], 10);
 
       if (lastYear === currentYear) {
-        // نفس السنة → نزيد
-        const newSeq = (lastSeq + 1).toString().padStart(4, "0");
-        nextNumber = `VENTE-${newSeq}/${currentYear}`;
-      } else {
-        // سنة جديدة → نرجع لـ 0001
-        const newSeq = START_SEQ.toString().padStart(4, "0");
-        nextNumber = `VENTE-${newSeq}/${currentYear}`;
+        const lastSeq = parseInt(ventePart.split("-")[1], 10);
+        nextSeq = lastSeq + 1;
       }
-    } else {
-      // أول عملية بيع في السيستام
-      const newSeq = START_SEQ.toString().padStart(4, "0");
-      nextNumber = `VENTE-${newSeq}/${currentYear}`;
+    }
+
+    // Format: VENTE-0001/2026
+    let nextNumber;
+    while (true) {
+      nextNumber = `VENTE-${String(nextSeq).padStart(4, "0")}/${currentYear}`;
+
+      const exists = await repo.findOne({
+        where: { numeroCommande: nextNumber },
+      });
+
+      if (!exists) break;
+      nextSeq++;
     }
 
     res.json({ numeroCommande: nextNumber });
@@ -506,4 +509,3 @@ exports.fetchNextVenteComptoireNumber = async (req, res) => {
     });
   }
 };
-
