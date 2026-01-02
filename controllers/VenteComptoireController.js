@@ -466,38 +466,44 @@ exports.deleteVenteComptoire = async (req, res) => {
 exports.fetchNextVenteComptoireNumber = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(VenteComptoire);
+
     const lastVente = await repo.findOne({
-      where: {},
       order: { id: "DESC" },
     });
 
     const currentYear = new Date().getFullYear();
-    const DEFAULT_START_SEQ = 948; // ← هنا
+    const START_SEQ = 1;
 
     let nextNumber;
 
-    if (lastVente) {
-      const [prefix, yearPart] = lastVente.numeroCommande.split("/");
-      const lastSeq = parseInt(prefix.split("-")[1], 10);
+    if (lastVente && lastVente.numeroCommande) {
+      // الصيغة: VENTE-0001/2026
+      const [ventePart, yearPart] = lastVente.numeroCommande.split("/");
+      const lastYear = parseInt(yearPart, 10);
+      const lastSeq = parseInt(ventePart.split("-")[1], 10);
 
-      if (parseInt(yearPart, 10) === currentYear) {
-        const base = Math.max(lastSeq + 1, DEFAULT_START_SEQ);
-        const newSeq = base.toString().padStart(4, "0");
+      if (lastYear === currentYear) {
+        // نفس السنة → نزيد
+        const newSeq = (lastSeq + 1).toString().padStart(4, "0");
         nextNumber = `VENTE-${newSeq}/${currentYear}`;
       } else {
-        // بداية سنة جديدة → ممكن تبقى 0001 أو 0925 حسب رغبتك
-        const newSeq = DEFAULT_START_SEQ.toString().padStart(4, "0");
+        // سنة جديدة → نرجع لـ 0001
+        const newSeq = START_SEQ.toString().padStart(4, "0");
         nextNumber = `VENTE-${newSeq}/${currentYear}`;
       }
     } else {
-      // أول عملية إطلاقاً
-      const newSeq = DEFAULT_START_SEQ.toString().padStart(4, "0");
+      // أول عملية بيع في السيستام
+      const newSeq = START_SEQ.toString().padStart(4, "0");
       nextNumber = `VENTE-${newSeq}/${currentYear}`;
     }
 
     res.json({ numeroCommande: nextNumber });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur", error: err.message });
+    res.status(500).json({
+      message: "Erreur serveur",
+      error: err.message,
+    });
   }
 };
+

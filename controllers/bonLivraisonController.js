@@ -709,60 +709,53 @@ exports.annulerBonLivraison = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
-
 exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "LIVRAISON-"; // This should be LIVRAISON- not BL-
-    const MIN_START = 364;
-
+    const prefix = "LIVRAISON-";
     const repo = AppDataSource.getRepository(BonLivraison);
 
-    // Get last bon livraison for this year
+    // آخر BonLivraison من نفس السنة
     const lastBon = await repo
       .createQueryBuilder("bon")
       .where("bon.numeroLivraison LIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
-      .orderBy("bon.createdAt", "DESC")
+      .orderBy("bon.id", "DESC")
       .getOne();
 
-    let nextNumber;
+    let nextSeq = 1;
 
-    if (!lastBon || !lastBon.numeroLivraison) {
-      nextNumber = MIN_START; // Start from 350
-    } else {
-      // Extract number from LIVRAISON-350/2025
-      const match = lastBon.numeroLivraison.match(
-        new RegExp(`^${prefix}(\\d{3})/${year}$`)
-      );
-      nextNumber = match ? parseInt(match[1], 10) + 1 : MIN_START;
+    if (lastBon && lastBon.numeroLivraison) {
+      // الصيغة: LIVRAISON-001/2026
+      const [livraisonPart, yearPart] =
+        lastBon.numeroLivraison.split("/");
+      const lastYear = parseInt(yearPart, 10);
+
+      if (lastYear === year) {
+        const lastSeq = parseInt(livraisonPart.split("-")[1], 10);
+        nextSeq = lastSeq + 1;
+      }
     }
-
-    // Ensure minimum 350
-    nextNumber = Math.max(nextNumber, MIN_START);
 
     let nextLivraisonNumber;
 
     while (true) {
-      // Format: LIVRAISON-350/2025
-      nextLivraisonNumber = `${prefix}${String(nextNumber).padStart(
+      nextLivraisonNumber = `${prefix}${String(nextSeq).padStart(
         3,
         "0"
       )}/${year}`;
 
-      // Check if it already exists
-      const existing = await repo.findOne({
+      const exists = await repo.findOne({
         where: { numeroLivraison: nextLivraisonNumber },
       });
 
-      if (!existing) break; // unique number found
-      nextNumber++; // increment and try next
+      if (!exists) break;
+      nextSeq++;
     }
 
     res.json({
       numeroLivraison: nextLivraisonNumber,
-      nextNumber: nextNumber,
     });
   } catch (err) {
     console.error(err);
@@ -772,6 +765,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
     });
   }
 };
+
 
 // ✅ DELETE — restore article quantities and update BC status before deleting bon
 

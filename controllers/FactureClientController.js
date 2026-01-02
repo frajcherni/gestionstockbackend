@@ -439,38 +439,52 @@ exports.annulerFactureClient = async (req, res) => {
 exports.getNextFactureNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "FACTURE";
-
+    const prefix = "FACTURE-";
     const repo = AppDataSource.getRepository(FactureClient);
 
-    // Get the last numeroFacture for this year
+    // آخر Facture من نفس السنة
     const lastFacture = await repo
       .createQueryBuilder("fact")
       .where("fact.numeroFacture LIKE :pattern", {
-        pattern: `${prefix}-%/${year}`,
+        pattern: `${prefix}%/${year}`,
       })
       .orderBy("fact.id", "DESC")
       .getOne();
 
-    let nextNumber = 426;
+    let nextSeq = 1;
 
-    if (lastFacture) {
-      // Extract the numeric part between "-" and "/"
-      const match = lastFacture.numeroFacture.match(/FACTURE-(\d+)\/\d{4}/);
-      if (match && match[1]) {
-        nextNumber = parseInt(match[1]) + 1;
+    if (lastFacture && lastFacture.numeroFacture) {
+      // الصيغة: FACTURE-001/2026
+      const [facturePart, yearPart] =
+        lastFacture.numeroFacture.split("/");
+      const lastYear = parseInt(yearPart, 10);
+
+      if (lastYear === year) {
+        const lastSeq = parseInt(facturePart.split("-")[1], 10);
+        nextSeq = lastSeq + 1;
       }
     }
 
-    // Format number with 3 digits (e.g., 001)
-    const formattedNumber = nextNumber.toString().padStart(3, "0");
+    let nextFactureNumber;
 
-    // Final format: FACTURE-001/2025
-    const newNumeroFacture = `${prefix}-${formattedNumber}/${year}`;
+    while (true) {
+      nextFactureNumber = `${prefix}${String(nextSeq).padStart(
+        3,
+        "0"
+      )}/${year}`;
 
-    res.status(200).json({ numeroFacture: newNumeroFacture });
+      const exists = await repo.findOne({
+        where: { numeroFacture: nextFactureNumber },
+      });
+
+      if (!exists) break;
+      nextSeq++;
+    }
+
+    res.status(200).json({ numeroFacture: nextFactureNumber });
   } catch (error) {
     console.error("❌ Error generating facture number:", error);
     res.status(500).json({ message: error.message });
   }
 };
+

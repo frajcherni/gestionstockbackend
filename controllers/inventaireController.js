@@ -741,10 +741,13 @@ exports.getNextInventaireNumberEnhanced = async (req, res) => {
         
         // Get current year
         const currentYear = new Date().getFullYear();
+        
+        // CHANGED: Always use previous year (currentYear - 1)
+        const targetYear = currentYear - 1;
+        
         const prefix = "INVENTAIRE";
         
         // Find the last inventaire number overall
-        // FIXED: Using find() with order and limit 1 instead of findOne()
         const lastInventaires = await inventaireRepo.find({
             select: ['numero', 'created_at'],
             order: { created_at: 'DESC' },
@@ -753,7 +756,7 @@ exports.getNextInventaireNumberEnhanced = async (req, res) => {
         
         const lastInventaire = lastInventaires.length > 0 ? lastInventaires[0] : null;
         
-        let nextYear = currentYear;
+        let nextYear = targetYear; // Use targetYear (currentYear - 1)
         let nextSequence = 1;
         
         if (lastInventaire && lastInventaire.numero) {
@@ -765,11 +768,11 @@ exports.getNextInventaireNumberEnhanced = async (req, res) => {
                 const lastYear = parseInt(matches[1], 10);
                 const lastSequence = parseInt(matches[2], 10);
                 
-                if (lastYear === currentYear) {
-                    // Same year, increment sequence
+                if (lastYear === targetYear) { // CHANGED: Compare with targetYear
+                    // Same year (previous year), increment sequence
                     nextSequence = lastSequence + 1;
-                } else if (lastYear < currentYear) {
-                    // New year, reset sequence
+                } else if (lastYear < targetYear) {
+                    // New year (previous year), reset sequence
                     nextSequence = 1;
                 } else {
                     // Should not happen, but handle gracefully
@@ -791,7 +794,7 @@ exports.getNextInventaireNumberEnhanced = async (req, res) => {
                             const lastYear = parseInt(matches[1], 10);
                             const lastSequence = parseInt(matches[2], 10);
                             
-                            if (lastYear === currentYear) {
+                            if (lastYear === targetYear) { // CHANGED: Compare with targetYear
                                 nextSequence = lastSequence + 1;
                             } else {
                                 nextSequence = 1;

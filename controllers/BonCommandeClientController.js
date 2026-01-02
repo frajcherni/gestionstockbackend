@@ -624,41 +624,42 @@ exports.getNextCommandeNumber = async (req, res) => {
     const prefix = "COMMANDE-";
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
 
-    // Get last BonCommande for this year
+    // آخر BonCommande من نفس السنة
     const lastBon = await bonRepo
       .createQueryBuilder("bon")
       .where("bon.numeroCommande LIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
-      .orderBy("bon.createdAt", "DESC")
+      .orderBy("bon.id", "DESC")
       .getOne();
 
-    let nextNumber;
-    if (!lastBon || !lastBon.numeroCommande) {
-      nextNumber = 358; // Start from COMMANDE001/year
-    } else {
-      const match = lastBon.numeroCommande.match(
-        new RegExp(`^${prefix}(\\d{3})/${year}$`)
-      );
-      nextNumber = match ? parseInt(match[1], 10) + 1 : 1;
+    let nextSeq = 1;
+
+    if (lastBon && lastBon.numeroCommande) {
+      // الصيغة: COMMANDE-001/2026
+      const [commandePart, yearPart] = lastBon.numeroCommande.split("/");
+      const lastYear = parseInt(yearPart, 10);
+
+      if (lastYear === year) {
+        const lastSeq = parseInt(commandePart.split("-")[1], 10);
+        nextSeq = lastSeq + 1;
+      }
     }
 
     let nextCommandeNumber;
 
     while (true) {
-      // Format next number (e.g., BC005/2025)
-      nextCommandeNumber = `${prefix}${String(nextNumber).padStart(
+      nextCommandeNumber = `${prefix}${String(nextSeq).padStart(
         3,
         "0"
       )}/${year}`;
 
-      // Check if it already exists
-      const existing = await bonRepo.findOne({
+      const exists = await bonRepo.findOne({
         where: { numeroCommande: nextCommandeNumber },
       });
 
-      if (!existing) break; // unique number found → exit loop
-      nextNumber++; // otherwise, increment and try next one
+      if (!exists) break;
+      nextSeq++;
     }
 
     res.json({ numeroCommande: nextCommandeNumber });
