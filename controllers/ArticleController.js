@@ -1,20 +1,18 @@
-const { AppDataSource } = require('../db');
-const {Article} = require('../entities/Article');
+const { AppDataSource } = require("../db");
+const { Article } = require("../entities/Article");
 
+const { Fournisseur } = require("../entities/Fournisseur");
+const { Categorie } = require("../entities/Categorie");
 
-const { Fournisseur } = require('../entities/Fournisseur');
-const { Categorie } = require('../entities/Categorie');
+const multer = require("multer");
 
-
-const multer = require('multer');
-
-const path = require('path');
-const fs = require('fs');
+const path = require("path");
+const fs = require("fs");
 
 // Configure multer storage
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = 'uploads/articles/';
+    const uploadDir = "uploads/articles/";
     // Create directory if it doesn't exist
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
@@ -22,39 +20,37 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'article-' + uniqueSuffix + path.extname(file.originalname));
-  }
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "article-" + uniqueSuffix + path.extname(file.originalname));
+  },
 });
 
 // Create multer instance
 const upload = multer({
   storage: storage,
   fileFilter: function (req, file, cb) {
-    if (file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed!'), false);
+      cb(new Error("Only image files are allowed!"), false);
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB
-  }
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
 });
 
 // Use this for single file upload with text fields
-const uploadMiddleware = upload.single('image');
+const uploadMiddleware = upload.single("image");
 
 exports.createArticle = async (req, res) => {
-  // Handle the file upload
   uploadMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
     }
 
     try {
-      console.log('=== REQUEST BODY ===', req.body);
-      console.log('=== REQUEST FILE ===', req.file);
+      console.log("=== REQUEST BODY ===", req.body);
 
       const fournisseurRepo = AppDataSource.getRepository(Fournisseur);
       const categorieRepo = AppDataSource.getRepository(Categorie);
@@ -85,10 +81,58 @@ exports.createArticle = async (req, res) => {
         });
       }
 
+      // GET THE NEXT AVAILABLE ID
+      const maxIdResult = await AppDataSource.query(
+        "SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM articles"
+      );
+      const nextId = parseInt(maxIdResult[0].next_id);
+
+      console.log(`📌 Next available ID: ${nextId}`);
+
+      // Generate PROPER 13-digit EAN-13 barcode
+      let codeBarre = null;
+      if (nextId) {
+        // Use "330" as prefix (France country code) for consistency with existing barcodes
+        const countryCode = "330"; // France EAN prefix
+
+        // Create 9-digit product number from ID (pad to 9 digits)
+        const productNumber = nextId.toString().padStart(9, "0");
+
+        // Combine to create 12-digit base (3 + 9 = 12)
+        const baseNumber = countryCode + productNumber; // 12 digits
+
+        // Calculate EAN-13 checksum
+        let sum = 0;
+        for (let i = 0; i < baseNumber.length; i++) {
+          const digit = parseInt(baseNumber.charAt(i));
+          // EAN-13: positions counted from RIGHT, odd=1, even=3
+          const positionFromRight = baseNumber.length - i;
+          const multiplier = positionFromRight % 2 === 0 ? 3 : 1;
+          sum += digit * multiplier;
+        }
+
+        // Calculate checksum digit (0-9)
+        const checksum = (10 - (sum % 10)) % 10;
+
+        // Final 13-digit barcode
+        codeBarre = baseNumber + checksum.toString();
+
+        console.log(`✅ Generated 13-digit EAN-13: ${codeBarre}`);
+        console.log(`📊 Format: ${countryCode}-${productNumber}-${checksum}`);
+
+        // Validate it's exactly 13 digits
+        if (codeBarre.length !== 13) {
+          console.warn(
+            `⚠️ Warning: Barcode length is ${codeBarre.length}, expected 13`
+          );
+        }
+      }
+
       const article = articleRepo.create({
-        reference: req.body.reference || '',
-        designation: req.body.designation || '',
-        nom: req.body.nom || req.body.designation || req.body.reference || '',
+        id: nextId,
+        reference: req.body.reference || "",
+        designation: req.body.designation || "",
+        nom: req.body.nom || req.body.designation || req.body.reference || "",
         qte: parseInt(req.body.qte) || 0,
         qte_virtual: parseInt(req.body.qte) || 0,
         pua_ht: parseFloat(req.body.pua_ht) || 0,
@@ -96,8 +140,11 @@ exports.createArticle = async (req, res) => {
         pua_ttc: parseFloat(req.body.pua_ttc) || 0,
         puv_ttc: parseFloat(req.body.puv_ttc) || 0,
         tva: parseInt(req.body.tva) || 0,
-        taux_fodec: req.body.taux_fodec === 'true' || req.body.taux_fodec === true,
-        type: req.body.type || 'Non Consigné',
+        taux_fodec:
+          req.body.taux_fodec === "true" || req.body.taux_fodec === true,
+        type: req.body.type || "Non Consigné",
+        code_barre: codeBarre,
+        code_barres: codeBarre ? [codeBarre] : [],
         fournisseur,
         categorie,
         sousCategorie,
@@ -105,16 +152,18 @@ exports.createArticle = async (req, res) => {
       });
 
       const savedArticle = await articleRepo.save(article);
-      console.log('✅ Article saved:', savedArticle);
+      console.log("✅ Article saved with ID:", savedArticle.id);
 
       // Add full URL for image in response
       if (savedArticle.image) {
-        savedArticle.image = `${req.protocol}://${req.get('host')}/${savedArticle.image}`;
+        savedArticle.image = `${req.protocol}://${req.get("host")}/${
+          savedArticle.image
+        }`;
       }
 
       res.status(201).json(savedArticle);
     } catch (error) {
-      console.error('❌ Error creating article:', error);
+      console.error("❌ Error creating article:", error);
       if (req.file) {
         fs.unlinkSync(req.file.path);
       }
@@ -123,19 +172,20 @@ exports.createArticle = async (req, res) => {
   });
 };
 
-
 exports.getAllArticles = async (req, res) => {
   try {
     const articles = await AppDataSource.getRepository(Article).find({
-      relations: ["categorie", "fournisseur", "sousCategorie"]
+      relations: ["categorie", "fournisseur", "sousCategorie"],
     });
-    
+
     // Add full URL for images
-    const articlesWithImageUrl = articles.map(article => ({
+    const articlesWithImageUrl = articles.map((article) => ({
       ...article,
-      image: article.image ? `${req.protocol}://${req.get('host')}/${article.image}` : null
+      image: article.image
+        ? `${req.protocol}://${req.get("host")}/${article.image}`
+        : null,
     }));
-    
+
     res.json(articlesWithImageUrl);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -146,28 +196,27 @@ exports.getArticleById = async (req, res) => {
   try {
     const article = await AppDataSource.getRepository(Article).findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["categorie", "fournisseur", "sousCategorie"]
+      relations: ["categorie", "fournisseur", "sousCategorie"],
     });
-    
+
     if (!article) {
       return res.status(404).json({ message: "Article not found" });
     }
-    
+
     // Add full URL for image
     if (article.image) {
-      article.image = `${req.protocol}://${req.get('host')}/${article.image}`;
+      article.image = `${req.protocol}://${req.get("host")}/${article.image}`;
     }
-    
+
     res.json(article);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-
 exports.updateArticle = async (req, res) => {
   // First, handle the file upload
-  uploadMiddleware(req, res, async function(err) {
+  uploadMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
     }
@@ -179,9 +228,9 @@ exports.updateArticle = async (req, res) => {
 
       const article = await articleRepository.findOne({
         where: { id: parseInt(req.params.id) },
-        relations: ["categorie", "fournisseur", "sousCategorie"]
+        relations: ["categorie", "fournisseur", "sousCategorie"],
       });
-      
+
       if (!article) {
         // Delete uploaded file if article not found
         if (req.file) {
@@ -190,9 +239,9 @@ exports.updateArticle = async (req, res) => {
         return res.status(404).json({ message: "Article not found" });
       }
 
-      console.log('=== UPDATE REQUEST BODY ===', req.body);
-      console.log('=== UPDATE REQUEST FILE ===', req.file);
-      
+      console.log("=== UPDATE REQUEST BODY ===", req.body);
+      console.log("=== UPDATE REQUEST FILE ===", req.file);
+
       const {
         reference,
         designation,
@@ -207,13 +256,15 @@ exports.updateArticle = async (req, res) => {
         nom,
         fournisseur_id,
         categorie_id,
-        sous_categorie_id
+        sous_categorie_id,
       } = req.body;
 
       // Store old image path for deletion if new image is uploaded
       const oldImagePath = article.image;
       if (fournisseur_id) {
-        const fournisseur = await fournisseurRepository.findOneBy({ id: parseInt(fournisseur_id) });
+        const fournisseur = await fournisseurRepository.findOneBy({
+          id: parseInt(fournisseur_id),
+        });
         if (!fournisseur) {
           // Delete uploaded file if validation fails
           if (req.file) {
@@ -225,7 +276,9 @@ exports.updateArticle = async (req, res) => {
       }
 
       if (categorie_id) {
-        const categorie = await categorieRepository.findOneBy({ id: parseInt(categorie_id) });
+        const categorie = await categorieRepository.findOneBy({
+          id: parseInt(categorie_id),
+        });
         if (!categorie) {
           // Delete uploaded file if validation fails
           if (req.file) {
@@ -238,7 +291,9 @@ exports.updateArticle = async (req, res) => {
 
       // Handle subcategory
       if (sous_categorie_id) {
-        const sousCategorie = await categorieRepository.findOneBy({ id: parseInt(sous_categorie_id) });
+        const sousCategorie = await categorieRepository.findOneBy({
+          id: parseInt(sous_categorie_id),
+        });
         article.sousCategorie = sousCategorie;
       } else {
         article.sousCategorie = null;
@@ -251,7 +306,9 @@ exports.updateArticle = async (req, res) => {
       article.pua_ht = pua_ht ? parseFloat(pua_ht) : article.pua_ht;
       article.puv_ht = puv_ht ? parseFloat(puv_ht) : article.puv_ht;
       article.tva = tva ? parseInt(tva) : article.tva;
-      article.taux_fodec = taux_fodec ? (taux_fodec === 'true' || taux_fodec === true) : article.taux_fodec;
+      article.taux_fodec = taux_fodec
+        ? taux_fodec === "true" || taux_fodec === true
+        : article.taux_fodec;
       article.type = type ?? article.type;
       article.qte = qte ? parseInt(qte) : article.qte;
       article.nom = nom ?? article.nom;
@@ -266,14 +323,13 @@ exports.updateArticle = async (req, res) => {
       }
 
       const result = await articleRepository.save(article);
-      
+
       // Add full URL for image in response
       if (result.image) {
-        result.image = `${req.protocol}://${req.get('host')}/${result.image}`;
+        result.image = `${req.protocol}://${req.get("host")}/${result.image}`;
       }
-      
-      res.json(result);
 
+      res.json(result);
     } catch (error) {
       // Delete uploaded file if there's an error
       if (req.file) {
@@ -284,26 +340,26 @@ exports.updateArticle = async (req, res) => {
   });
 };
 
-
 exports.deleteArticle = async (req, res) => {
   try {
-    const result = await AppDataSource.getRepository(Article).delete(req.params.id);
-    
+    const result = await AppDataSource.getRepository(Article).delete(
+      req.params.id
+    );
+
     if (result.affected === 0) {
       return res.status(404).json({ message: "Article not found" });
     }
-    
+
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-
 exports.getAllArticles = async (req, res) => {
   try {
     const articles = await AppDataSource.getRepository(Article).find({
-      relations: ["categorie", "fournisseur" , "sousCategorie"]
+      relations: ["categorie", "fournisseur", "sousCategorie"],
     });
     res.json(articles);
   } catch (error) {
@@ -315,40 +371,33 @@ exports.getArticleById = async (req, res) => {
   try {
     const article = await AppDataSource.getRepository(Article).findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["categorie", "fournisseur"]
+      relations: ["categorie", "fournisseur"],
     });
-    
+
     if (!article) {
       return res.status(404).json({ message: "Article not found" });
     }
-    
+
     res.json(article);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-
-
 exports.updateArticleWebsiteSettings = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      on_website,
-      is_offre,
-      is_top_seller,
-      is_new_arrival,
-      Description
-    } = req.body;
+    const { on_website, is_offre, is_top_seller, is_new_arrival, Description } =
+      req.body;
 
     const articleRepo = AppDataSource.getRepository(Article);
-    
+
     const article = await articleRepo.findOne({
-      where: { id: parseInt(id) }
+      where: { id: parseInt(id) },
     });
-    
+
     if (!article) {
-      return res.status(404).json({ message: 'Article not found' });
+      return res.status(404).json({ message: "Article not found" });
     }
 
     // Update website settings
@@ -360,9 +409,8 @@ exports.updateArticleWebsiteSettings = async (req, res) => {
     article.updated_at = new Date();
 
     const updatedArticle = await articleRepo.save(article);
-    
+
     res.json(updatedArticle);
-    
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -371,64 +419,65 @@ exports.updateArticleWebsiteSettings = async (req, res) => {
 // Configure multer for website images (multiple files)
 const websiteStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = 'uploads/website-images/';
+    const uploadDir = "uploads/website-images/";
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'website-' + uniqueSuffix + path.extname(file.originalname));
-  }
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "website-" + uniqueSuffix + path.extname(file.originalname));
+  },
 });
 
 const uploadWebsiteImages = multer({
   storage: websiteStorage,
   fileFilter: function (req, file, cb) {
-    if (file.mimetype.startsWith('image/')) {
+    if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed!'), false);
+      cb(new Error("Only image files are allowed!"), false);
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB
-  }
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
 });
 
-const uploadWebsiteMiddleware = uploadWebsiteImages.array('images', 10); 
-
+const uploadWebsiteMiddleware = uploadWebsiteImages.array("images", 10);
 
 exports.uploadWebsiteImages = async (req, res) => {
   // Use the upload middleware
-  uploadWebsiteMiddleware(req, res, async function(err) {
+  uploadWebsiteMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
     }
 
     try {
       const { id } = req.params;
-      
+
       if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ message: 'No images uploaded' });
+        return res.status(400).json({ message: "No images uploaded" });
       }
 
       const articleRepo = AppDataSource.getRepository(Article);
-      const article = await articleRepo.findOne({ where: { id: parseInt(id) } });
-      
+      const article = await articleRepo.findOne({
+        where: { id: parseInt(id) },
+      });
+
       if (!article) {
         // Delete uploaded files if article not found
-        req.files.forEach(file => {
+        req.files.forEach((file) => {
           if (fs.existsSync(file.path)) {
             fs.unlinkSync(file.path);
           }
         });
-        return res.status(404).json({ message: 'Article not found' });
+        return res.status(404).json({ message: "Article not found" });
       }
 
       // Generate file paths
-      const newImages = req.files.map(file => file.path);
+      const newImages = req.files.map((file) => file.path);
 
       // Add new images to existing ones
       const currentImages = article.website_images || [];
@@ -440,15 +489,14 @@ exports.uploadWebsiteImages = async (req, res) => {
       const updatedArticle = await articleRepo.save(article);
 
       res.json({
-        message: 'Images uploaded successfully',
+        message: "Images uploaded successfully",
         images: newImages,
-        article: updatedArticle
+        article: updatedArticle,
       });
-
     } catch (error) {
       // Clean up uploaded files on error
       if (req.files) {
-        req.files.forEach(file => {
+        req.files.forEach((file) => {
           if (fs.existsSync(file.path)) {
             fs.unlinkSync(file.path);
           }
@@ -459,9 +507,6 @@ exports.uploadWebsiteImages = async (req, res) => {
   });
 };
 
-
-
-
 exports.removeWebsiteImage = async (req, res) => {
   try {
     const { id, imageIndex } = req.params;
@@ -469,21 +514,21 @@ exports.removeWebsiteImage = async (req, res) => {
 
     const articleRepo = AppDataSource.getRepository(Article);
     const article = await articleRepo.findOne({ where: { id: parseInt(id) } });
-    
+
     if (!article) {
-      return res.status(404).json({ message: 'Article not found' });
+      return res.status(404).json({ message: "Article not found" });
     }
 
     const currentImages = article.website_images || [];
-    
+
     if (index < 0 || index >= currentImages.length) {
-      return res.status(400).json({ message: 'Invalid image index' });
+      return res.status(400).json({ message: "Invalid image index" });
     }
 
     // Remove image from array
     const imageToRemove = currentImages[index];
     const updatedImages = currentImages.filter((_, i) => i !== index);
-    
+
     article.website_images = updatedImages;
     article.updated_at = new Date();
 
@@ -495,10 +540,9 @@ exports.removeWebsiteImage = async (req, res) => {
     }
 
     res.json({
-      message: 'Image removed successfully',
-      article: updatedArticle
+      message: "Image removed successfully",
+      article: updatedArticle,
     });
-
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

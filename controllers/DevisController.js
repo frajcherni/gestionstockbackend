@@ -227,6 +227,9 @@ exports.getAllDevisClient = async (req, res) => {
     const repo = AppDataSource.getRepository(DevisClient);
     const list = await repo.find({
       relations: ["client", "vendeur", "articles", "articles.article"],
+      order: {
+        dateCommande: "DESC" // Correct: This should be inside an 'order' object
+      }
     });
     res.json(list);
   } catch (err) {

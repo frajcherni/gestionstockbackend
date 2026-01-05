@@ -401,6 +401,9 @@ exports.getAllVenteComptoire = async (req, res) => {
     const repo = AppDataSource.getRepository(VenteComptoire);
     const list = await repo.find({
       relations: ["client", "vendeur", "articles", "articles.article"],
+      order: {
+        dateCommande: "DESC" // Correct: This should be inside an 'order' object
+      }
     });
 
     const enhancedList = list.map((vente) => {

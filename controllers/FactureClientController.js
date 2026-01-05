@@ -25,6 +25,9 @@ exports.getAllFacturesClient = async (req, res) => {
         "articles",
         "articles.article",
       ],
+      order: {
+        dateFacture: "DESC" // Correct: This should be inside an 'order' object
+      }
     });
     res.json(list);
   } catch (err) {

@@ -815,6 +815,9 @@ exports.getAllBonLivraisons = async (req, res) => {
         "articles.article",
         "bonCommandeClient",
       ],
+      order: {
+        dateLivraison: "DESC" // Correct: This should be inside an 'order' object
+      }
     });
     res.json(list);
   } catch (err) {
