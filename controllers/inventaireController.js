@@ -33,14 +33,12 @@ exports.getAllInventaires = async (req, res) => {
 // Add at the top with other imports
 
 exports.createInventaire = async (req, res) => {
-    // Créer un query runner pour gérer les transactions
     const queryRunner = AppDataSource.createQueryRunner();
     
     try {
-        // Récupérer les données de la requête
         const { numero, date, date_inventaire, depot, description, articles } = req.body;
 
-        // Validation des données requises
+        // Simple validation
         if (!numero || !date || !date_inventaire || !depot || !articles || !Array.isArray(articles) || articles.length === 0) {
             return res.status(400).json({
                 success: false,
@@ -48,18 +46,14 @@ exports.createInventaire = async (req, res) => {
             });
         }
 
-        // Connexion et début de la transaction
         await queryRunner.connect();
         await queryRunner.startTransaction();
 
-        // Récupérer les repositories nécessaires
         const inventaireRepo = queryRunner.manager.getRepository(Inventaire);
         const inventaireItemRepo = queryRunner.manager.getRepository(InventaireItem);
         const articleRepo = queryRunner.manager.getRepository(Article);
-        const depotRepo = queryRunner.manager.getRepository(Depot);
-        const stockRepo = queryRunner.manager.getRepository(StockDepot);
 
-        // Vérifier si le numéro d'inventaire existe déjà
+        // Check if numero exists
         const existingInventaire = await inventaireRepo.findOne({ where: { numero } });
         if (existingInventaire) {
             return res.status(400).json({
@@ -68,196 +62,78 @@ exports.createInventaire = async (req, res) => {
             });
         }
 
-        // Récupérer l'entité du dépôt
-        const depotEntity = await depotRepo.findOne({ where: { nom: depot } });
-        if (!depotEntity) {
-            return res.status(400).json({
-                success: false,
-                message: `Dépôt "${depot}" non trouvé`
-            });
-        }
-
-        // === MODIFICATION : Créer l'inventaire avec status "Brouillon" au lieu de "Terminé" ===
-        // Créer l'entité inventaire
+        // 1. Create inventaire with "Terminé" status
         const newInventaire = inventaireRepo.create({
-            numero,                        // Numéro de l'inventaire
-            date,                          // Date de création
-            date_inventaire,               // Date de l'inventaire
-            depot,                         // Nom du dépôt
-            description: description || "", // Description optionnelle
-            status: "Brouillon",           // MODIFICATION : Passer en "Brouillon" au lieu de "Terminé"
-            article_count: articles.length, // Nombre d'articles
-            total_ht: 0,                   // Total HT (calculé plus tard)
-            total_ttc: 0,                  // Total TTC (calculé plus tard)
-            total_tva: 0                   // Total TVA (calculé plus tard)
+            numero,
+            date,
+            date_inventaire,
+            depot,
+            description: description || "",
+            status: "Terminé", // Always "Terminé"
+            article_count: articles.length,
+            total_ht: 0,
+            total_ttc: 0,
+            total_tva: 0
         });
 
-        // Sauvegarder l'inventaire
         await inventaireRepo.save(newInventaire);
 
-        // Variables pour calculer les totaux
+        // 2. Create inventaire items
+        const createdItems = [];
         let totalHT = 0;
         let totalTVA = 0;
         let totalTTC = 0;
-        
-        // Grouper les articles par ID pour traiter les doublons
-        const articleGroups = new Map();
-        // MODIFICATION SUPPRIMÉE : Retirer les maps pour les stocks car on ne met plus à jour
-        // const articleStockMap = new Map(); // Supprimé
-        const allArticleIds = new Set();
-        
-        // Première passe : grouper les articles et collecter les IDs
+
         for (const item of articles) {
             const { article_id, qte_reel, ligne_numero } = item;
-            allArticleIds.add(article_id); // Ajouter l'ID à la collection
-            
-            if (!articleGroups.has(article_id)) {
-                articleGroups.set(article_id, []); // Créer un groupe pour cet article
-            }
-            
-            // Ajouter l'item au groupe correspondant
-            articleGroups.get(article_id).push({
-                ...item,
-                ligne_numero: ligne_numero || 0
-            });
-        }
 
-        // === MODIFICATION SUPPRIMÉE : Ne plus récupérer les stocks initiaux ===
-        // const initialStocks = await stockRepo.find({
-        //     where: {
-        //         article_id: In(Array.from(allArticleIds)),
-        //         depot_id: depotEntity.id
-        //     }
-        // });
-        // 
-        // initialStocks.forEach(stock => {
-        //     articleStockMap.set(stock.article_id, stock.qte || 0);
-        // });
-
-        // Récupérer les détails des articles pour les prix (toujours nécessaire)
-        const articleDetails = await articleRepo.findByIds(Array.from(allArticleIds));
-        const articleDetailsMap = new Map();
-        articleDetails.forEach(article => {
-            articleDetailsMap.set(article.id, article); // Créer une map article_id -> article
-        });
-
-        // Créer les items d'inventaire et calculer les totaux
-        const createdItems = [];
-        
-        // Parcourir chaque groupe d'articles
-        for (const [articleId, items] of articleGroups) {
-            const article = articleDetailsMap.get(articleId);
+            // Get article for prices
+            const article = await articleRepo.findOne({ where: { id: article_id } });
             if (!article) {
-                console.warn(`Article ${articleId} non trouvé, ignoré`);
-                continue; // Passer à l'article suivant si non trouvé
+                console.warn(`Article ${article_id} non trouvé`);
+                continue;
             }
 
-            // === MODIFICATION SUPPRIMÉE : Ne plus calculer les stocks initiaux ===
-            // const initialStock = articleStockMap.get(articleId) || 0;
-            // const totalQteReel = items.reduce((sum, item) => sum + item.qte_reel, 0);
-            // let remainingStock = initialStock;
-            
-            // Créer les items d'inventaire pour chaque ligne
-            for (const item of items) {
-                const { qte_reel, ligne_numero } = item;
-                
-                // === MODIFICATION : Simplifier la logique FIFO, pas besoin de calculer qte_avant ===
-                // const qteAvantForItem = 0; // MODIFICATION : Toujours 0 pour un inventaire brouillon
-                const qteAvantForItem = 0; // MODIFICATION : Pas de calcul FIFO pour brouillon
-                // let remainingStock = 0; // MODIFICATION SUPPRIMÉE
-                
-                // === MODIFICATION SUPPRIMÉE : Logique FIFO complète ===
-                // FIFO: allocate from remaining stock
-                // let qteAvantForItem = 0;
-                // if (remainingStock > 0) {
-                //     if (remainingStock >= qte_reel) {
-                //         qteAvantForItem = qte_reel;
-                //         remainingStock -= qte_reel;
-                //     } else {
-                //         qteAvantForItem = remainingStock;
-                //         remainingStock = 0;
-                //     }
-                // }
-                
-                // Calculer la quantité d'ajustement
-                const qteAjustementForItem = qte_reel - qteAvantForItem;
-                
-                // Calculer les prix
-                const pua_ht = parseFloat(article.pua_ht) || 0;
-                const tva_rate = parseFloat(article.tva) || 19;
-                const total_ht = pua_ht * qte_reel;
-                const total_tva = total_ht * (tva_rate / 100);
-                const total_ttc = total_ht + total_tva;
-                
-                // Ajouter aux totaux globaux
-                totalHT += total_ht;
-                totalTVA += total_tva;
-                totalTTC += total_ttc;
-                
-                // === MODIFICATION : Créer l'item sans arrondir pour l'instant ===
-                // Créer l'item d'inventaire
-                const inventaireItem = inventaireItemRepo.create({
-                    inventaire_id: newInventaire.id,          // Référence à l'inventaire parent
-                    article_id: articleId,                    // ID de l'article
-                    ligne_numero: ligne_numero,               // Numéro de ligne
-                    qte_avant: 0,                            // MODIFICATION : Toujours 0 pour brouillon
-                    qte_reel: qte_reel,                      // Quantité réelle (pas arrondie)
-                    qte_ajustement: qte_reel,                // MODIFICATION : Ajustement = quantité réelle
-                    pua_ht: pua_ht,                          // Prix d'achat HT
-                    pua_ttc: pua_ht * (1 + (tva_rate / 100)), // Prix d'achat TTC
-                    tva: tva_rate,                           // Taux de TVA
-                    total_tva: total_tva,                    // Total TVA pour cette ligne
-                    total_ht: total_ht,                      // Total HT pour cette ligne
-                    total_ttc: total_ttc                     // Total TTC pour cette ligne
-                });
-                
-                // Sauvegarder l'item
-                createdItems.push(await inventaireItemRepo.save(inventaireItem));
-            }
-            
-            // === MODIFICATION SUPPRIMÉE : Ne plus mettre à jour les stocks ===
-            // Update stock with new total
-            // let stockDepot = await stockRepo.findOne({
-            //     where: {
-            //         article_id: articleId,
-            //         depot_id: depotEntity.id
-            //     }
-            // });
-            // 
-            // if (stockDepot) {
-            //     stockDepot.qte = Math.round(totalQteReel);
-            //     await stockRepo.save(stockDepot);
-            // } else {
-            //     await stockRepo.save({
-            //         article_id: articleId,
-            //         depot_id: depotEntity.id,
-            //         qte: Math.round(totalQteReel)
-            //     });
-            // }
-            
-            // === MODIFICATION SUPPRIMÉE : Ne plus mettre à jour la quantité globale de l'article ===
-            // Update article global quantity
-            // const allDepotStocks = await stockRepo.find({ 
-            //     where: { article_id: articleId } 
-            // });
-            // const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + (stock.qte || 0), 0);
-            // 
-            // await articleRepo.update(
-            //     { id: articleId },
-            //     { qte: Math.round(totalArticleStock) }
-            // );
+            // Calculate prices
+            const pua_ht = parseFloat(article.pua_ht) || 0;
+            const tva_rate = parseFloat(article.tva) || 19;
+            const total_ht = pua_ht * qte_reel;
+            const total_tva = total_ht * (tva_rate / 100);
+            const total_ttc = total_ht + total_tva;
+
+            // Add to totals
+            totalHT += total_ht;
+            totalTVA += total_tva;
+            totalTTC += total_ttc;
+
+            // Create item
+            const inventaireItem = inventaireItemRepo.create({
+                inventaire_id: newInventaire.id,
+                article_id: article_id,
+                ligne_numero: ligne_numero || 0,
+                qte_avant: 0, // Always 0 for simple version
+                qte_reel: qte_reel,
+                qte_ajustement: qte_reel, // Same as qte_reel
+                pua_ht: pua_ht,
+                pua_ttc: pua_ht * (1 + (tva_rate / 100)),
+                tva: tva_rate,
+                total_tva: total_tva,
+                total_ht: total_ht,
+                total_ttc: total_ttc
+            });
+
+            createdItems.push(await inventaireItemRepo.save(inventaireItem));
         }
 
-        // Mettre à jour les totaux de l'inventaire
+        // 3. Update inventaire totals
         newInventaire.total_ht = totalHT;
         newInventaire.total_tva = totalTVA;
         newInventaire.total_ttc = totalTTC;
         await inventaireRepo.save(newInventaire);
 
-        // Valider la transaction
         await queryRunner.commitTransaction();
 
-        // Retourner l'inventaire créé
+        // Return created inventaire
         const completeInventaire = await inventaireRepo.findOne({
             where: { id: newInventaire.id },
             relations: ['items', 'items.article']
@@ -266,11 +142,10 @@ exports.createInventaire = async (req, res) => {
         res.status(201).json({
             success: true,
             data: completeInventaire,
-            message: "Inventaire créé avec succès (en mode brouillon)" // MODIFICATION : Message mis à jour
+            message: "Inventaire créé avec succès"
         });
 
     } catch (error) {
-        // En cas d'erreur, annuler la transaction
         await queryRunner.rollbackTransaction();
         console.error("Error creating inventaire:", error);
         res.status(500).json({
@@ -278,11 +153,9 @@ exports.createInventaire = async (req, res) => {
             message: error.message || "Erreur lors de la création de l'inventaire"
         });
     } finally {
-        // Libérer le query runner
         await queryRunner.release();
     }
 };
-
 // Update inventaire
 // controllers/InventaireController.js - updateInventaire CORRIGÉ
 exports.updateInventaire = async (req, res) => {
