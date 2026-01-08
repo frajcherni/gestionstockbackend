@@ -172,6 +172,132 @@ exports.createArticle = async (req, res) => {
   });
 };
 
+exports.updateArticle = async (req, res) => {
+  // First, handle the file upload
+  uploadMiddleware(req, res, async function (err) {
+    if (err) {
+      return res.status(400).json({ message: err.message });
+    }
+
+    try {
+      const articleRepository = AppDataSource.getRepository(Article);
+      const fournisseurRepository = AppDataSource.getRepository(Fournisseur);
+      const categorieRepository = AppDataSource.getRepository(Categorie);
+
+      const article = await articleRepository.findOne({
+        where: { id: parseInt(req.params.id) },
+        relations: ["categorie", "fournisseur", "sousCategorie"],
+      });
+
+      if (!article) {
+        // Delete uploaded file if article not found
+        if (req.file) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(404).json({ message: "Article not found" });
+      }
+
+      console.log("=== UPDATE REQUEST BODY ===", req.body);
+      console.log("=== UPDATE REQUEST FILE ===", req.file);
+
+      const {
+        reference,
+        designation,
+        pua_ttc,
+        puv_ttc,
+        pua_ht,
+        puv_ht,
+        tva,
+        taux_fodec,
+        type,
+        qte,
+        nom,
+        fournisseur_id,
+        categorie_id,
+        sous_categorie_id,
+      } = req.body;
+
+      // Store old image path for deletion if new image is uploaded
+      const oldImagePath = article.image;
+      if (fournisseur_id) {
+        const fournisseur = await fournisseurRepository.findOneBy({
+          id: parseInt(fournisseur_id),
+        });
+        if (!fournisseur) {
+          // Delete uploaded file if validation fails
+          if (req.file) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(400).json({ message: "Invalid fournisseur_id" });
+        }
+        article.fournisseur = fournisseur;
+      }
+
+      if (categorie_id) {
+        const categorie = await categorieRepository.findOneBy({
+          id: parseInt(categorie_id),
+        });
+        if (!categorie) {
+          // Delete uploaded file if validation fails
+          if (req.file) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(400).json({ message: "Invalid categorie_id" });
+        }
+        article.categorie = categorie;
+      }
+
+      // Handle subcategory
+      if (sous_categorie_id) {
+        const sousCategorie = await categorieRepository.findOneBy({
+          id: parseInt(sous_categorie_id),
+        });
+        article.sousCategorie = sousCategorie;
+      } else {
+        article.sousCategorie = null;
+      }
+
+      article.reference = reference ?? article.reference;
+      article.designation = designation ?? article.designation;
+      article.pua_ttc = pua_ttc ? parseFloat(pua_ttc) : article.pua_ttc;
+      article.puv_ttc = puv_ttc ? parseFloat(puv_ttc) : article.puv_ttc;
+      article.pua_ht = pua_ht ? parseFloat(pua_ht) : article.pua_ht;
+      article.puv_ht = puv_ht ? parseFloat(puv_ht) : article.puv_ht;
+      article.tva = tva ? parseInt(tva) : article.tva;
+      article.taux_fodec = taux_fodec
+        ? taux_fodec === "true" || taux_fodec === true
+        : article.taux_fodec;
+      article.type = type ?? article.type;
+      article.qte = qte ? parseInt(qte) : article.qte;
+      article.nom = nom ?? article.nom;
+
+      // Update image if new file is uploaded
+      if (req.file) {
+        article.image = req.file.path;
+        // Delete old image file
+        if (oldImagePath && fs.existsSync(oldImagePath)) {
+          fs.unlinkSync(oldImagePath);
+        }
+      }
+
+      const result = await articleRepository.save(article);
+
+      // Add full URL for image in response
+      if (result.image) {
+        result.image = `${req.protocol}://${req.get("host")}/${result.image}`;
+      }
+
+      res.json(result);
+    } catch (error) {
+      // Delete uploaded file if there's an error
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      res.status(400).json({ message: error.message });
+    }
+  });
+};
+
 exports.getAllArticles = async (req, res) => {
   try {
     const articles = await AppDataSource.getRepository(Article).find({

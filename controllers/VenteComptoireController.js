@@ -92,6 +92,7 @@ exports.createVenteComptoire = async (req, res) => {
 
       // CALCULATE prix_ttc WITH FODEC FORMULA
       let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
+      console.log(prix_ttc)
       
       if (!prix_ttc) {
         // ✅ ADD FODEC CALCULATION HERE

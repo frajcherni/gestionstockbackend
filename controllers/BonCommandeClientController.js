@@ -21,6 +21,7 @@ exports.createBonCommandeClient = async (req, res) => {
     const {
       numeroCommande,
       dateCommande,
+      dateLivBonCommande,
       remise,
       remiseType,
       notes,
@@ -124,6 +125,8 @@ exports.createBonCommandeClient = async (req, res) => {
     const bonCommande = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
+      dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : null, // Add this line
+
       status: "Confirme",
       remise: remise || 0,
       remiseType: remiseType,
@@ -161,6 +164,9 @@ exports.createBonCommandeClient = async (req, res) => {
       }
 
       let prixUnitaire = parseFloat(item.prix_unitaire);
+
+      let prix_ttc = parseFloat(item.prix_ttc);
+      console.log(prix_ttc,'prix_ttc')
       const tvaRate = item.tva || 0;
 
       if (taxMode === "TTC") {
@@ -200,7 +206,7 @@ exports.createBonCommandeClient = async (req, res) => {
         quantite: quantite,
         quantiteLivree: quantiteLivree, // ✅ Store the initial delivered quantity
         prixUnitaire,
-        prix_ttc: prixUnitaire * (1 + tvaRate / 100),
+        prix_ttc: prix_ttc,
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
       };
@@ -342,6 +348,11 @@ exports.updateBonCommandeClient = async (req, res) => {
     
     // Basic fields
     if (req.body.dateCommande) updates.dateCommande = new Date(req.body.dateCommande);
+    if (req.body.dateLivBonCommande !== undefined) {
+      updates.dateLivBonCommande = req.body.dateLivBonCommande 
+        ? new Date(req.body.dateLivBonCommande) 
+        : null;
+    }
     updates.status = newStatus;
     if (req.body.remise !== undefined) updates.remise = parseFloat(req.body.remise);
     if (req.body.remiseType) updates.remiseType = req.body.remiseType;
@@ -433,10 +444,15 @@ exports.updateBonCommandeClient = async (req, res) => {
 
           // Update the article in bon
           let prixUnitaire = parseFloat(newItem.prix_unitaire);
+          let prix_ttc = parseFloat(newItem.prix_ttc); // ADD THIS LINE
+
           const tvaRate = newItem.tva || 0;
 
           if (req.body.taxMode === "TTC") {
             prixUnitaire = prixUnitaire / (1 + tvaRate / 100);
+            if (!newItem.prix_ttc) {
+              prix_ttc = prixUnitaire * (1 + tvaRate / 100);
+            }
           }
 
           await bonArticleRepo.update(existingItem.id, {
@@ -468,10 +484,15 @@ exports.updateBonCommandeClient = async (req, res) => {
           }
 
           let prixUnitaire = parseFloat(newItem.prix_unitaire);
+          let prix_ttc = parseFloat(newItem.prix_ttc); // ADD THIS LINE
+
           const tvaRate = newItem.tva || 0;
 
           if (req.body.taxMode === "TTC") {
             prixUnitaire = prixUnitaire / (1 + tvaRate / 100);
+            if (!newItem.prix_ttc) {
+              prix_ttc = prixUnitaire * (1 + tvaRate / 100);
+            }
           }
 
           const quantiteLivree = parseInt(newItem.quantiteLivree) || 0;
@@ -489,7 +510,7 @@ exports.updateBonCommandeClient = async (req, res) => {
             quantite: parseInt(newItem.quantite),
             quantiteLivree: quantiteLivree,
             prixUnitaire: prixUnitaire,
-            prix_ttc: prixUnitaire * (1 + tvaRate / 100),
+            prix_ttc: prix_ttc, // UPDATE THIS LINE - use the prix_ttc variable
             tva: tvaRate,
             remise: newItem.remise ? parseFloat(newItem.remise) : null,
           });

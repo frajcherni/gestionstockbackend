@@ -7,6 +7,7 @@ const BonCommandeClient = new EntitySchema({
     id: { primary: true, type: "int", generated: true },
     numeroCommande: { type: "varchar", unique: true },
     dateCommande: { type: "timestamp" },
+    dateLivBonCommande : { type: "timestamp" , nullable:"true"},
     status: {
       type: "enum",
       enum: ["Brouillon", "Confirme", "Livre", "Partiellement Livre", "Annule"],
