@@ -812,7 +812,8 @@ exports.getAllBonCommandeClient = async (req, res) => {
         "clientWebsite",
       ],
       order: {
-        dateCommande: "DESC" // Correct: This should be inside an 'order' object
+        dateCommande: "DESC",
+        numeroCommande: "DESC", // Correct: This should be inside an 'order' object
       }
     });
     res.json(list);

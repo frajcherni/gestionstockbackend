@@ -403,7 +403,8 @@ exports.getAllVenteComptoire = async (req, res) => {
     const list = await repo.find({
       relations: ["client", "vendeur", "articles", "articles.article"],
       order: {
-        dateCommande: "DESC" // Correct: This should be inside an 'order' object
+        dateCommande: "DESC",
+         numeroCommande:"DESC" , // Correct: This should be inside an 'order' object
       }
     });
 

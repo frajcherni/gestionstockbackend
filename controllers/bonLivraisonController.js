@@ -709,6 +709,7 @@ exports.annulerBonLivraison = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
+
 exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
@@ -766,9 +767,6 @@ exports.getNextLivraisonNumber = async (req, res) => {
   }
 };
 
-
-// ✅ DELETE — restore article quantities and update BC status before deleting bon
-
 exports.annulerBonLivraison = async (req, res) => {
   try {
     const bonRepo = AppDataSource.getRepository(BonLivraison);
@@ -816,7 +814,8 @@ exports.getAllBonLivraisons = async (req, res) => {
         "bonCommandeClient",
       ],
       order: {
-        dateLivraison: "DESC" // Correct: This should be inside an 'order' object
+        dateLivraison: "DESC" ,
+        numeroLivraison: "DESC " // Correct: This should be inside an 'order' object
       }
     });
     res.json(list);
