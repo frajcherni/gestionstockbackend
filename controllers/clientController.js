@@ -95,3 +95,116 @@ exports.deleteClient = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
+
+// Add this to your clientController.js
+exports.searchClients = async (req, res) => {
+  try {
+    // --- Read body parameters ---
+    const q = typeof req.body.q === "string" ? req.body.q.trim() : "";
+    
+    // --- Optional status filter ---
+    const status = typeof req.body.status === "string" ? req.body.status.trim() : "Actif";
+
+    // --- Optional pagination (safe defaults) ---
+    let pageNumber = parseInt(req.body.page, 10);
+    let limitNumber = parseInt(req.body.limit, 10);
+
+    if (isNaN(pageNumber) || pageNumber < 1) pageNumber = 1;
+    if (isNaN(limitNumber) || limitNumber < 1) limitNumber = 20;
+
+    limitNumber = Math.min(limitNumber, 100);
+    const offset = (pageNumber - 1) * limitNumber;
+
+    const repo = AppDataSource.getRepository(Client);
+
+    // --- Query only the safe fields (no unnecessary joins) ---
+    const qb = repo.createQueryBuilder("client")
+      .select([
+        "client.id",
+        "client.numero",
+        "client.raison_sociale",
+        "client.designation",
+        "client.matricule_fiscal",
+        "client.register_commerce",
+        "client.adresse",
+        "client.ville",
+        "client.code_postal",
+        "client.telephone1",
+        "client.telephone2",
+        "client.telephone3",
+        "client.telephone4",
+        "client.email",
+        "client.site_web",
+        "client.commentaire",
+        "client.nature",
+        "client.timbre",
+        "client.exonere",
+        "client.permanent",
+        "client.solde",
+        "client.tau_rem",
+        "client.passager",
+        "client.status",
+        "client.poste",
+        "client.utilisateur",
+        "client.date_creation",
+        "client.date_maj",
+        "client.heure_maj",
+        "client.path_sigle",
+        "client.sigle",
+        "client.createdAt",
+        "client.updatedAt"
+      ]);
+
+    // --- Apply status filter if provided ---
+    if (status) {
+      qb.where("client.status = :status", { status });
+    }
+
+    // --- Search by multiple fields ---
+    if (q !== "") {
+      const searchTerm = `%${q}%`;
+      const cleanPhoneTerm = q.replace(/\s/g, ''); // Remove spaces for phone search
+      
+      qb.andWhere(
+        `(client.raison_sociale ILIKE :search OR 
+          client.designation ILIKE :search OR 
+          REPLACE(client.telephone1, ' ', '') ILIKE :phone OR 
+          REPLACE(client.telephone2, ' ', '') ILIKE :phone OR 
+          client.matricule_fiscal ILIKE :search OR 
+          client.email ILIKE :search)`,
+        { 
+          search: searchTerm,
+          phone: `%${cleanPhoneTerm}%`
+        }
+      );
+    }
+
+    // --- Get total matching count ---
+    const total = await qb.clone().getCount();
+
+    // --- Apply pagination and ordering ---
+    const clients = await qb
+      .orderBy("client.raison_sociale", "ASC")
+      .offset(offset)
+      .limit(limitNumber)
+      .getMany();
+
+    // --- No need to modify URLs for clients (no image field) ---
+    res.json({
+      clients,
+      total,
+      page: pageNumber,
+      limit: limitNumber,
+      totalPages: Math.ceil(total / limitNumber)
+    });
+
+  } catch (error) {
+    console.error("CLIENT SEARCH ERROR:", error);
+    res.status(500).json({ 
+      message: "Erreur lors de la recherche des clients",
+      error: error.message 
+    });
+  }
+};

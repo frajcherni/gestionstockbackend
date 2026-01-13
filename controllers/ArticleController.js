@@ -673,3 +673,73 @@ exports.removeWebsiteImage = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+
+exports.searchArticles = async (req, res) => {
+  try {
+    // --- Read body parameters ---
+    const q = typeof req.body.q === "string" ? req.body.q.trim() : "";
+
+    // --- Optional pagination (safe defaults) ---
+    let pageNumber = parseInt(req.body.page, 10);
+    let limitNumber = parseInt(req.body.limit, 10);
+
+    if (isNaN(pageNumber) || pageNumber < 1) pageNumber = 1;
+    if (isNaN(limitNumber) || limitNumber < 1) limitNumber = 50;
+
+    limitNumber = Math.min(limitNumber, 100);
+    const offset = (pageNumber - 1) * limitNumber;
+
+    const repo = AppDataSource.getRepository(Article);
+
+    // --- Query only the safe fields ---
+    const qb = repo.createQueryBuilder("article")
+      .select([
+        "article.id",
+        "article.reference",
+        "article.designation",
+        "article.pua_ht",
+        "article.pua_ttc",
+        "article.puv_ht",
+        "article.puv_ttc",
+        "article.tva",
+
+      ]);
+
+    // --- Search by reference or designation ---
+    if (q !== "") {
+      qb.where(
+        "article.reference ILIKE :term OR article.designation ILIKE :term",
+        { term: `%${q}%` }
+      );
+    }
+
+    // --- Get total matching count ---
+    const total = await qb.clone().getCount();
+
+    // --- Apply pagination safely ---
+    const articles = await qb
+      .orderBy("article.designation", "ASC")
+      .offset(offset)
+      .limit(limitNumber)
+      .getMany();
+
+    // --- Add full image URL ---
+    const articlesWithUrls = articles.map(a => ({
+      ...a,
+      image: a.image ? `${req.protocol}://${req.get("host")}/${a.image}` : null
+    }));
+
+    res.json({
+      articles: articlesWithUrls,
+      total,
+      page: pageNumber,
+      limit: limitNumber,
+      totalPages: Math.ceil(total / limitNumber)
+    });
+
+  } catch (error) {
+    console.error("SEARCH ERROR:", error);
+    res.status(500).json({ message: error.message });
+  }
+};

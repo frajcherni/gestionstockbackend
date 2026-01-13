@@ -7,7 +7,7 @@ router.get('/:id', articleController.getArticleById);
 router.post('/addarticle', articleController.createArticle);
 router.put('/updatearticle/:id', articleController.updateArticle);
 router.delete('/deletearticle/:id', articleController.deleteArticle);
-
+router.post('/search', articleController.searchArticles);
 
 router.put('/:id/website-settings', articleController.updateArticleWebsiteSettings);
 router.post('/:id/website-images', articleController.uploadWebsiteImages);
