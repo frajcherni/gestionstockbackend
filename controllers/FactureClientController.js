@@ -286,6 +286,7 @@ exports.updateFactureClient = async (req, res) => {
       exoneration,
       timbreFiscal,
       articles,
+      paymentMethods, // ADDED: paymentMethods field
     } = req.body;
 
     const factureRepo = AppDataSource.getRepository(FactureClient);
@@ -318,6 +319,7 @@ exports.updateFactureClient = async (req, res) => {
     facture.totalHT = totalHT;
     facture.totalTTC = totalTTC;
     facture.totalTVA = totalTVA;
+    facture.paymentMethods = paymentMethods; // ADDED: Update paymentMethods field
 
     // Client
     if (client_id) {
