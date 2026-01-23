@@ -109,6 +109,7 @@ const BonCommandeClientArticle = new EntitySchema({
     },
     prixUnitaire: { type: "decimal", precision: 10, scale: 3 },
     prix_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
+    designation: { type: "varchar", length: 500, nullable: true }, // ADD THIS LINE
 
     tva: {
       type: "decimal",

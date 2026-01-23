@@ -203,6 +203,7 @@ exports.createBonCommandeClient = async (req, res) => {
 
       const bonArticle = {
         article,
+        designation: item.designation || article.designation || '', // ADD THIS LINE
         quantite: quantite,
         quantiteLivree: quantiteLivree, // ✅ Store the initial delivered quantity
         prixUnitaire,
