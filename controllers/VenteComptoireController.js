@@ -92,8 +92,8 @@ exports.createVenteComptoire = async (req, res) => {
 
       // CALCULATE prix_ttc WITH FODEC FORMULA
       let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
-      console.log(prix_ttc)
-      
+      console.log(prix_ttc);
+
       if (!prix_ttc) {
         // ✅ ADD FODEC CALCULATION HERE
         if (hasFodec) {
@@ -101,10 +101,14 @@ exports.createVenteComptoire = async (req, res) => {
           const fodecAmount = prixUnitaire * 0.01;
           const baseTVA = prixUnitaire + fodecAmount;
           const tvaAmount = baseTVA * (tvaRate / 100);
-          prix_ttc = parseFloat((prixUnitaire + fodecAmount + tvaAmount).toFixed(3));
+          prix_ttc = parseFloat(
+            (prixUnitaire + fodecAmount + tvaAmount).toFixed(3)
+          );
         } else {
           // Original logic without FODEC
-          prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+          prix_ttc = parseFloat(
+            (prixUnitaire * (1 + tvaRate / 100)).toFixed(3)
+          );
         }
       } else {
         // ✅ ADD FODEC AWARE LOGIC WHEN prix_ttc IS PROVIDED
@@ -115,7 +119,9 @@ exports.createVenteComptoire = async (req, res) => {
             prixUnitaire = parseFloat((prix_ttc / coefficient).toFixed(3));
           } else {
             // Original logic without FODEC
-            prixUnitaire = parseFloat((prix_ttc / (1 + tvaRate / 100)).toFixed(3));
+            prixUnitaire = parseFloat(
+              (prix_ttc / (1 + tvaRate / 100)).toFixed(3)
+            );
           }
         }
       }
@@ -125,7 +131,7 @@ exports.createVenteComptoire = async (req, res) => {
       const montantHTLigne = quantite * prixUnitaire * (1 - remiseRate / 100);
       const montantTTCLigne = quantite * prix_ttc;
       const taxAmount = montantTTCLigne - montantHTLigne;
-      
+
       // ✅ ADD FODEC AMOUNT CALCULATION
       let fodecAmount = 0;
       if (hasFodec) {
@@ -142,6 +148,7 @@ exports.createVenteComptoire = async (req, res) => {
         quantite,
         prixUnitaire,
         prix_ttc: prix_ttc,
+        designation: item.designation || article.designation || "", // ADD THIS LINE
         fodec: hasFodec, // ✅ SAVE FODEC FLAG IN DATABASE
         tva: tvaRate,
         remise: remiseRate || null,
@@ -228,15 +235,19 @@ exports.updateVenteComptoire = async (req, res) => {
 
           // ✅ CALCULATE prix_ttc WITH FODEC FORMULA
           let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
-          
+
           if (!prix_ttc) {
             if (hasFodec) {
               const fodecAmount = prixUnitaire * 0.01;
               const baseTVA = prixUnitaire + fodecAmount;
               const tvaAmount = baseTVA * (tvaRate / 100);
-              prix_ttc = parseFloat((prixUnitaire + fodecAmount + tvaAmount).toFixed(3));
+              prix_ttc = parseFloat(
+                (prixUnitaire + fodecAmount + tvaAmount).toFixed(3)
+              );
             } else {
-              prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+              prix_ttc = parseFloat(
+                (prixUnitaire * (1 + tvaRate / 100)).toFixed(3)
+              );
             }
           }
 
@@ -244,7 +255,7 @@ exports.updateVenteComptoire = async (req, res) => {
             quantite * prixUnitaire * (1 - remiseRate / 100);
           const montantTTCLigne = quantite * prix_ttc;
           grandTotal += montantTTCLigne;
-          
+
           // ✅ CALCULATE FODEC AMOUNT
           if (hasFodec) {
             totalFodec += prixUnitaire * 0.01 * quantite;
@@ -259,7 +270,7 @@ exports.updateVenteComptoire = async (req, res) => {
             item.quantite *
             (item.prix_ttc || item.prixUnitaire * (1 + (item.tva || 0) / 100));
           grandTotal += montantTTCLigne;
-          
+
           // ✅ CALCULATE FODEC FROM EXISTING ARTICLES
           if (item.fodec) {
             totalFodec += item.prixUnitaire * 0.01 * item.quantite;
@@ -335,18 +346,22 @@ exports.updateVenteComptoire = async (req, res) => {
         const prixUnitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
         const hasFodec = item.fodec || false; // ✅ GET FODEC FLAG
-        
+
         // ✅ CALCULATE prix_ttc WITH FODEC FORMULA
         let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
-        
+
         if (!prix_ttc) {
           if (hasFodec) {
             const fodecAmount = prixUnitaire * 0.01;
             const baseTVA = prixUnitaire + fodecAmount;
             const tvaAmount = baseTVA * (tvaRate / 100);
-            prix_ttc = parseFloat((prixUnitaire + fodecAmount + tvaAmount).toFixed(3));
+            prix_ttc = parseFloat(
+              (prixUnitaire + fodecAmount + tvaAmount).toFixed(3)
+            );
           } else {
-            prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+            prix_ttc = parseFloat(
+              (prixUnitaire * (1 + tvaRate / 100)).toFixed(3)
+            );
           }
         }
 
@@ -375,6 +390,7 @@ exports.updateVenteComptoire = async (req, res) => {
             quantite: parseInt(item.quantite),
             prixUnitaire,
             prix_ttc: prix_ttc,
+            designation: item.designation || article.designation || "", // ADD THIS LINE
             fodec: hasFodec, // ✅ SAVE FODEC FLAG
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
@@ -383,7 +399,6 @@ exports.updateVenteComptoire = async (req, res) => {
         }
       }
     }
-
     // --- Reload and return updated vente ---
     const updatedVente = await venteRepo.findOne({
       where: { id: vente.id },
@@ -404,8 +419,8 @@ exports.getAllVenteComptoire = async (req, res) => {
       relations: ["client", "vendeur", "articles", "articles.article"],
       order: {
         dateCommande: "DESC",
-         numeroCommande:"DESC" , // Correct: This should be inside an 'order' object
-      }
+        numeroCommande: "DESC", // Correct: This should be inside an 'order' object
+      },
     });
 
     const enhancedList = list.map((vente) => {

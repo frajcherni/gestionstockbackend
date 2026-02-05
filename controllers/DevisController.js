@@ -69,10 +69,17 @@ exports.updateDevisClient = async (req, res) => {
 
         const prixUnitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
-        
-        // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
-        const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
 
+        // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
+        let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
+        if (!prix_ttc) {
+          const prixUnitaire = parseFloat(item.prix_unitaire);
+          prix_ttc = parseFloat(
+            (prixUnitaire * (1 + tvaRate / 100)).toFixed(3)
+          );
+        }
+
+        console.log(prix_ttc);
         // check if article already exists in devis
         const existing = await devisArticleRepo.findOne({
           where: {
@@ -142,11 +149,7 @@ exports.createDevisClient = async (req, res) => {
     const devisRepo = AppDataSource.getRepository(DevisClient);
 
     // Validate required fields
-    if (
-      !numeroCommande ||
-      !client_id ||
-      !vendeur_id ||
-      !dateCommande    ) {
+    if (!numeroCommande || !client_id || !vendeur_id || !dateCommande) {
       return res
         .status(400)
         .json({ message: "Les champs obligatoires sont manquants" });
@@ -162,7 +165,7 @@ exports.createDevisClient = async (req, res) => {
     const devis = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
-      status : "Confirme",
+      status: "Confirme",
       remise: remise || 0,
       remiseType: remiseType || "percentage",
       notes: notes || null,
@@ -198,8 +201,11 @@ exports.createDevisClient = async (req, res) => {
       }
 
       // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
-      const prix_ttc = tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire;
-
+      let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
+      if (!prix_ttc) {
+        const prixUnitaire = parseFloat(item.prix_unitaire);
+        prix_ttc = parseFloat((prixUnitaire * (1 + tvaRate / 100)).toFixed(3));
+      }
       const devisArticle = {
         article,
         quantite: parseInt(item.quantite),
@@ -228,9 +234,9 @@ exports.getAllDevisClient = async (req, res) => {
     const list = await repo.find({
       relations: ["client", "vendeur", "articles", "articles.article"],
       order: {
-        dateCommande: "DESC" ,
-        numeroCommande : "DESC" // Correct: This should be inside an 'order' object
-      }
+        dateCommande: "DESC",
+        numeroCommande: "DESC", // Correct: This should be inside an 'order' object
+      },
     });
     res.json(list);
   } catch (err) {
@@ -255,118 +261,6 @@ exports.getDevisClientById = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
-  }
-};
-
-exports.updateDevisClient = async (req, res) => {
-  try {
-    const devisRepo = AppDataSource.getRepository(DevisClient);
-    const devisArticleRepo = AppDataSource.getRepository(DevisClientArticle);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const clientRepo = AppDataSource.getRepository(Client);
-    const vendeurRepo = AppDataSource.getRepository(Vendeur);
-
-    // --- Load devis ---
-    const devis = await devisRepo.findOne({
-      where: { id: parseInt(req.params.id) },
-      relations: ["articles", "articles.article", "client", "vendeur"],
-    });
-
-    if (!devis) {
-      return res.status(404).json({ message: "Devis client non trouvé" });
-    }
-
-    // --- Update parent scalar fields ---
-    const updates = {};
-    if (req.body.dateCommande)
-      updates.dateCommande = new Date(req.body.dateCommande);
-    if (req.body.status) updates.status = req.body.status;
-    if (req.body.remise !== undefined)
-      updates.remise = parseFloat(req.body.remise);
-    if (req.body.remiseType) updates.remiseType = req.body.remiseType;
-    if (req.body.notes !== undefined) updates.notes = req.body.notes;
-    if (req.body.taxMode) updates.taxMode = req.body.taxMode;
-
-    // --- Update relations ---
-    if (req.body.client_id) {
-      const client = await clientRepo.findOneBy({
-        id: parseInt(req.body.client_id),
-      });
-      if (!client)
-        return res.status(404).json({ message: "Client non trouvé" });
-      updates.client = client;
-    }
-
-    if (req.body.vendeur_id) {
-      const vendeur = await vendeurRepo.findOneBy({
-        id: parseInt(req.body.vendeur_id),
-      });
-      if (!vendeur)
-        return res.status(404).json({ message: "Vendeur non trouvé" });
-      updates.vendeur = vendeur;
-    }
-
-    // --- Apply updates to parent only ---
-    await devisRepo.update(devis.id, updates);
-
-    // --- Handle articles ---
-    if (req.body.articles && Array.isArray(req.body.articles)) {
-      for (const item of req.body.articles) {
-        const article = await articleRepo.findOneBy({
-          id: parseInt(item.article_id),
-        });
-        if (!article) {
-          return res
-            .status(404)
-            .json({ message: `Article avec ID ${item.article_id} non trouvé` });
-        }
-
-        const prixUnitaire = parseFloat(item.prix_unitaire);
-        const tvaRate = item.tva ? parseFloat(item.tva) : 0;
-
-        // check if article already exists in devis
-        const existing = await devisArticleRepo.findOne({
-          where: {
-            devisClient: { id: devis.id },
-            article: { id: article.id },
-          },
-          relations: ["article", "devisClient"],
-        });
-
-        if (existing) {
-          // --- Update existing line ---
-          existing.quantite = parseInt(item.quantite);
-          existing.prixUnitaire = prixUnitaire;
-          existing.tva = tvaRate;
-          existing.remise = item.remise ? parseFloat(item.remise) : null;
-
-          await devisArticleRepo.save(existing);
-        } else {
-          // --- Insert new line ---
-          const devisArticle = devisArticleRepo.create({
-            devisClient: { id: devis.id }, // attach by ID
-            article,
-            quantite: parseInt(item.quantite),
-            prixUnitaire,
-            tva: tvaRate,
-            remise: item.remise ? parseFloat(item.remise) : null,
-          });
-
-          await devisArticleRepo.save(devisArticle);
-        }
-      }
-    }
-
-    // --- Reload final devis with fresh data ---
-    const updatedDevis = await devisRepo.findOne({
-      where: { id: devis.id },
-      relations: ["client", "vendeur", "articles", "articles.article"],
-    });
-
-    res.json(updatedDevis);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
 

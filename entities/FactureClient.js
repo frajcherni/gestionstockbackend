@@ -12,7 +12,7 @@ const FactureClient = new EntitySchema({
     exoneration: {
       type: "boolean",
       default: false,
-      nullable: true ,
+      nullable: true,
     },
     conditionPaiement: { type: "varchar", nullable: true }, // Add conditionPaiement field
     status: {
@@ -20,16 +20,21 @@ const FactureClient = new EntitySchema({
       enum: ["Brouillon", "Validee", "Payee", "Annulee", "Partiellement Payee"],
       default: "Validee",
     },
-  
+
     totalHT: { type: "decimal", precision: 12, scale: 3, default: 0 },
     totalTVA: { type: "decimal", precision: 12, scale: 3, default: 0 },
     totalTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
-    totalTTCAfterRemise: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    totalTTCAfterRemise: {
+      type: "decimal",
+      precision: 12,
+      scale: 3,
+      default: 0,
+    },
 
     notes: { type: "text", nullable: true },
     modeReglement: {
       type: "enum",
-      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre" , "especes"],
+      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre", "especes"],
       nullable: true,
     },
     montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
@@ -51,21 +56,21 @@ const FactureClient = new EntitySchema({
       type: "boolean",
       default: false,
     },
-    paymentMethods: { 
-      type: "json", 
+    paymentMethods: {
+      type: "json",
       nullable: true,
-      default: null
+      default: null,
     },
-    totalPaymentAmount: { 
-      type: "decimal", 
-      precision: 12, 
-      scale: 3, 
+    totalPaymentAmount: {
+      type: "decimal",
+      precision: 12,
+      scale: 3,
       default: 0,
-      nullable: true 
+      nullable: true,
     },
-    espaceNotes: { 
-      type: "text", 
-      nullable: true 
+    espaceNotes: {
+      type: "text",
+      nullable: true,
     },
     remiseType: {
       type: "enum",
@@ -117,8 +122,8 @@ const FactureClient = new EntitySchema({
       type: "many-to-one",
       target: "VenteComptoire",
       nullable: true,
-      joinColumn: { name: "vente_comptoire_id" }
-  },
+      joinColumn: { name: "vente_comptoire_id" },
+    },
   },
 });
 
@@ -130,6 +135,7 @@ const FactureClientArticle = new EntitySchema({
     quantite: { type: "int" },
     prixUnitaire: { type: "decimal", precision: 12, scale: 3 },
     prix_ttc: { type: "decimal", precision: 12, scale: 3 },
+    designation: { type: "varchar", length: 500, nullable: true }, // ADD THIS LINE
 
     tva: { type: "decimal", precision: 7, scale: 3, nullable: true },
     remise: {

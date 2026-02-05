@@ -157,7 +157,9 @@ exports.createBonLivraison = async (req, res) => {
           article,
           quantite: quantiteSouhaiteePourCeBL,
           prix_unitaire,
-          prix_ttc: prix_ttc, // ✅ Store the TTC price
+          prix_ttc: prix_ttc,
+          designation: item.designation || article.designation || "", // ADD THIS LINE
+          // ✅ Store the TTC price
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : null,
         });
@@ -245,7 +247,10 @@ exports.createBonLivraison = async (req, res) => {
           article,
           quantite: quantitePourStock,
           prix_unitaire,
-          prix_ttc: prix_ttc, // ✅ Store the TTC price
+          prix_ttc: prix_ttc,
+          designation: item.designation || article.designation || "",
+          // ADD THIS LINE
+          // ✅ Store the TTC price
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : null,
         });
@@ -504,7 +509,9 @@ exports.updateBonLivraison = async (req, res) => {
             article,
             quantite: quantite,
             prix_unitaire,
-            prix_ttc: prix_ttc, // ✅ Store the TTC price from frontend
+            prix_ttc: prix_ttc,
+            designation: item.designation || article.designation || "", // ADD THIS LINE
+            // ✅ Store the TTC price from frontend
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           })
@@ -729,8 +736,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
 
     if (lastBon && lastBon.numeroLivraison) {
       // الصيغة: LIVRAISON-001/2026
-      const [livraisonPart, yearPart] =
-        lastBon.numeroLivraison.split("/");
+      const [livraisonPart, yearPart] = lastBon.numeroLivraison.split("/");
       const lastYear = parseInt(yearPart, 10);
 
       if (lastYear === year) {
@@ -814,9 +820,9 @@ exports.getAllBonLivraisons = async (req, res) => {
         "bonCommandeClient",
       ],
       order: {
-        dateLivraison: "DESC" ,
-        numeroLivraison: "DESC " // Correct: This should be inside an 'order' object
-      }
+        dateLivraison: "DESC",
+        numeroLivraison: "DESC ", // Correct: This should be inside an 'order' object
+      },
     });
     res.json(list);
   } catch (err) {

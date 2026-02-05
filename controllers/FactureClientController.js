@@ -92,7 +92,7 @@ exports.createFactureClient = async (req, res) => {
       montantRetenue = 0,
       hasRetenue = false,
     } = req.body;
-  
+  console.log(exoneration)
     const clientRepo = AppDataSource.getRepository(Client);
     const vendeurRepo = AppDataSource.getRepository(Vendeur);
     const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
@@ -208,12 +208,7 @@ exports.createFactureClient = async (req, res) => {
       articles: [],
     };
 
-    console.log("Creating facture:", {
-      hasBonCommande: !!bonCommandeClient,
-      bonCommandeClientId: bonCommandeClient ? bonCommandeClient.id : null,
-      hasVenteComptoire: !!venteComptoire, // ADD THIS
-      venteComptoireId: venteComptoire ? venteComptoire.id : null, // ADD THIS
-    });
+    console.log("Creating facture:",facture);
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
       return res.status(400).json({ message: "Les articles sont requis" });
@@ -249,6 +244,7 @@ exports.createFactureClient = async (req, res) => {
         quantite: parseInt(item.quantite),
         prixUnitaire: prixUnitaire,
         prix_ttc: +prix_ttc.toFixed(3),
+  designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : 0,
       };
@@ -367,7 +363,9 @@ exports.updateFactureClient = async (req, res) => {
           article: articleEntity,
           quantite: parseInt(item.quantite),
           prixUnitaire: prixUnitaire,
-          prix_ttc: +prix_ttc.toFixed(3), // Use the TTC value from frontend
+          prix_ttc: +prix_ttc.toFixed(3),
+  designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
+ // Use the TTC value from frontend
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : 0,
         };
