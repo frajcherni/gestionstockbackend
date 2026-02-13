@@ -643,7 +643,7 @@ exports.annulerBonCommandeClient = async (req, res) => {
 exports.getNextCommandeNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "COMMANDE-";
+    const prefix = "BON DE COMMANDE-";
     const bonRepo = AppDataSource.getRepository(BonCommandeClient);
 
     // آخر BonCommande من نفس السنة

@@ -510,7 +510,7 @@ exports.fetchNextVenteComptoireNumber = async (req, res) => {
     // Format: VENTE-0001/2026
     let nextNumber;
     while (true) {
-      nextNumber = `VENTE-${String(nextSeq).padStart(4, "0")}/${currentYear}`;
+      nextNumber = `VENTE COMPTOIRE-${String(nextSeq).padStart(4, "0")}/${currentYear}`;
 
       const exists = await repo.findOne({
         where: { numeroCommande: nextNumber },
