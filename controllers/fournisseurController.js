@@ -32,23 +32,7 @@ exports.getFournisseurById = async (req, res) => {
 
 exports.createFournisseur = async (req, res) => {
   try {
-    const requiredFields = [
-      'raison_sociale', 
-      'matricule_fiscal', 
-      'register_commerce',
-      'adresse',
-      'ville',
-      'code_postal',
-      'telephone1',
-      'email'
-    ];
-    
-    for (const field of requiredFields) {
-      if (!req.body[field]) {
-        return res.status(400).json({ message: `${field} is required` });
-      }
-    }
-
+ 
     const fournisseurRepository = AppDataSource.getRepository(Fournisseur);
     const newFournisseur = fournisseurRepository.create(req.body);
     const result = await fournisseurRepository.save(newFournisseur);
