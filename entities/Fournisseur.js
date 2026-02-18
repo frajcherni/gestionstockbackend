@@ -4,7 +4,7 @@ const Fournisseur = new EntitySchema({
   name: "Fournisseur",
   tableName: "fournisseurs",
   columns: {
-    id: { primary: true, type: "int", generated: false },
+    id: { primary: true, type: "int", generated: true },
     raison_sociale: { type: "varchar", length: 100, nullable: true },
     designation: { type: "varchar", length: 100, nullable: true },
     matricule_fiscal: { type: "varchar", length: 50, nullable: true },

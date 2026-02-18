@@ -31,15 +31,54 @@ exports.getFournisseurById = async (req, res) => {
 };
 
 exports.createFournisseur = async (req, res) => {
-  try {
- 
-    const fournisseurRepository = AppDataSource.getRepository(Fournisseur);
-    const newFournisseur = fournisseurRepository.create(req.body);
-    const result = await fournisseurRepository.save(newFournisseur);
-    res.status(201).json(result);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
+    try {
+        const {
+            raison_sociale,
+            designation,
+            matricule_fiscal,
+            register_commerce,
+            adresse,
+            ville,
+            code_postal,
+            telephone1,
+            telephone2,
+            email,
+            status
+        } = req.body;
+
+        // Validate required fields
+   
+        const fournisseurRepo = AppDataSource.getRepository(Fournisseur);
+
+
+        const newFournisseur = fournisseurRepo.create({
+            raison_sociale,
+            designation: designation || null,
+            matricule_fiscal: matricule_fiscal || null,
+            register_commerce: register_commerce || null,
+            adresse: adresse || null,
+            ville: ville || null,
+            code_postal: code_postal || null,
+            telephone1: telephone1 || null,
+            telephone2: telephone2 || null,
+            email: email || null,
+            status: status || "Actif"
+        });
+
+        const result = await fournisseurRepo.save(newFournisseur);
+        
+        res.status(201).json({
+            message: "Fournisseur créé avec succès",
+            fournisseur: result
+        });
+
+    } catch (err) {
+        console.error("Error creating fournisseur:", err);
+        res.status(500).json({ 
+            message: 'Erreur serveur lors de la création du fournisseur', 
+            error: err.message 
+        });
+    }
 };
 
 exports.updateFournisseur = async (req, res) => {
