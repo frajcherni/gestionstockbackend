@@ -213,6 +213,8 @@ exports.createDevisClient = async (req, res) => {
         prix_ttc: +prix_ttc.toFixed(3), // ADD THIS LINE - calculated TTC price
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
+        designation: item.designation || article.designation || "", // ADD THIS LINE
+
       };
 
       console.log(devisArticle);

@@ -788,6 +788,8 @@ const resteAPayer = parseFloat(req.body.totalTTC || 0) - montantPaye;
         prixUnitaire,
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
+          designation: item.designation || article.designation || "", // ADD THIS LINE
+
       };
 
       bonCommande.articles.push(bonArticle);
