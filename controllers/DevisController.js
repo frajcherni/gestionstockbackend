@@ -55,8 +55,38 @@ exports.updateDevisClient = async (req, res) => {
     // --- Apply updates to parent only ---
     await devisRepo.update(devis.id, updates);
 
-    // --- Handle articles ---
+    // --- Handle articles (delete, update, add) ---
     if (req.body.articles && Array.isArray(req.body.articles)) {
+      // Get IDs of articles in the request
+      const requestedArticleIds = req.body.articles
+        .map(item => parseInt(item.article_id))
+        .filter(id => !isNaN(id));
+      
+      console.log("Requested article IDs:", requestedArticleIds);
+      console.log("Existing devis articles:", devis.articles.map(da => ({
+        id: da.id,
+        articleId: da.article.id,
+        articleName: da.article.nom
+      })));
+      
+      // Find devis article records to delete (not just article IDs)
+      const articlesToDelete = devis.articles.filter(
+        da => !requestedArticleIds.includes(da.article.id)
+      );
+      
+      console.log("Articles to delete:", articlesToDelete.map(da => ({
+        id: da.id,
+        articleId: da.article.id
+      })));
+      
+      // Delete articles that are no longer in the list
+      if (articlesToDelete.length > 0) {
+        // Delete by IDs
+        const idsToDelete = articlesToDelete.map(da => da.id);
+        await devisArticleRepo.delete(idsToDelete);
+      }
+
+      // Process each article in the request (update or insert)
       for (const item of req.body.articles) {
         const article = await articleRepo.findOneBy({
           id: parseInt(item.article_id),
@@ -73,27 +103,23 @@ exports.updateDevisClient = async (req, res) => {
         // CALCULATE prix_ttc BASED ON prix_unitaire AND TVA
         let prix_ttc = item.prix_ttc ? parseFloat(item.prix_ttc) : null;
         if (!prix_ttc) {
-          const prixUnitaire = parseFloat(item.prix_unitaire);
           prix_ttc = parseFloat(
             (prixUnitaire * (1 + tvaRate / 100)).toFixed(3)
           );
         }
 
         console.log(prix_ttc);
-        // check if article already exists in devis
-        const existing = await devisArticleRepo.findOne({
-          where: {
-            devisClient: { id: devis.id },
-            article: { id: article.id },
-          },
-          relations: ["article", "devisClient"],
-        });
+        
+        // Check if article already exists in devis (using the loaded devis.articles array)
+        const existing = devis.articles.find(
+          da => da.article.id === article.id
+        );
 
         if (existing) {
           // --- Update existing line ---
           existing.quantite = parseInt(item.quantite);
           existing.prixUnitaire = prixUnitaire;
-          existing.prix_ttc = +prix_ttc.toFixed(3); // ADD THIS LINE - update TTC price
+          existing.prix_ttc = +prix_ttc.toFixed(3);
           existing.tva = tvaRate;
           existing.remise = item.remise ? parseFloat(item.remise) : null;
 
@@ -101,11 +127,11 @@ exports.updateDevisClient = async (req, res) => {
         } else {
           // --- Insert new line ---
           const devisArticle = devisArticleRepo.create({
-            devisClient: { id: devis.id }, // attach by ID
+            devisClient: { id: devis.id },
             article,
             quantite: parseInt(item.quantite),
             prixUnitaire,
-            prix_ttc: +prix_ttc.toFixed(3), // ADD THIS LINE - calculated TTC price
+            prix_ttc: +prix_ttc.toFixed(3),
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           });
