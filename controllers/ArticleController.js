@@ -56,6 +56,21 @@ exports.createArticle = async (req, res) => {
       const categorieRepo = AppDataSource.getRepository(Categorie);
       const articleRepo = AppDataSource.getRepository(Article);
 
+      // CHECK IF REFERENCE ALREADY EXISTS
+      const existingArticle = await articleRepo.findOne({
+        where: { reference: req.body.reference }
+      });
+
+      if (existingArticle) {
+        // Delete uploaded file if it exists
+        if (req.file && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+        return res.status(400).json({ 
+          message: `La référence "${req.body.reference}" existe déjà. Veuillez utiliser une référence unique.` 
+        });
+      }
+
       let fournisseur = null;
       let categorie = null;
 
@@ -92,40 +107,22 @@ exports.createArticle = async (req, res) => {
       // Generate PROPER 13-digit EAN-13 barcode
       let codeBarre = null;
       if (nextId) {
-        // Use "330" as prefix (France country code) for consistency with existing barcodes
-        const countryCode = "330"; // France EAN prefix
-
-        // Create 9-digit product number from ID (pad to 9 digits)
+        const countryCode = "330";
         const productNumber = nextId.toString().padStart(9, "0");
-
-        // Combine to create 12-digit base (3 + 9 = 12)
-        const baseNumber = countryCode + productNumber; // 12 digits
-
-        // Calculate EAN-13 checksum
+        const baseNumber = countryCode + productNumber;
+        
         let sum = 0;
         for (let i = 0; i < baseNumber.length; i++) {
           const digit = parseInt(baseNumber.charAt(i));
-          // EAN-13: positions counted from RIGHT, odd=1, even=3
           const positionFromRight = baseNumber.length - i;
           const multiplier = positionFromRight % 2 === 0 ? 3 : 1;
           sum += digit * multiplier;
         }
 
-        // Calculate checksum digit (0-9)
         const checksum = (10 - (sum % 10)) % 10;
-
-        // Final 13-digit barcode
         codeBarre = baseNumber + checksum.toString();
 
         console.log(`✅ Generated 13-digit EAN-13: ${codeBarre}`);
-        console.log(`📊 Format: ${countryCode}-${productNumber}-${checksum}`);
-
-        // Validate it's exactly 13 digits
-        if (codeBarre.length !== 13) {
-          console.warn(
-            `⚠️ Warning: Barcode length is ${codeBarre.length}, expected 13`
-          );
-        }
       }
 
       const article = articleRepo.create({
@@ -154,7 +151,6 @@ exports.createArticle = async (req, res) => {
       const savedArticle = await articleRepo.save(article);
       console.log("✅ Article saved with ID:", savedArticle.id);
 
-      // Add full URL for image in response
       if (savedArticle.image) {
         savedArticle.image = `${req.protocol}://${req.get("host")}/${
           savedArticle.image
@@ -164,7 +160,7 @@ exports.createArticle = async (req, res) => {
       res.status(201).json(savedArticle);
     } catch (error) {
       console.error("❌ Error creating article:", error);
-      if (req.file) {
+      if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
       res.status(500).json({ message: error.message });
@@ -172,131 +168,7 @@ exports.createArticle = async (req, res) => {
   });
 };
 
-exports.updateArticle = async (req, res) => {
-  // First, handle the file upload
-  uploadMiddleware(req, res, async function (err) {
-    if (err) {
-      return res.status(400).json({ message: err.message });
-    }
 
-    try {
-      const articleRepository = AppDataSource.getRepository(Article);
-      const fournisseurRepository = AppDataSource.getRepository(Fournisseur);
-      const categorieRepository = AppDataSource.getRepository(Categorie);
-
-      const article = await articleRepository.findOne({
-        where: { id: parseInt(req.params.id) },
-        relations: ["categorie", "fournisseur", "sousCategorie"],
-      });
-
-      if (!article) {
-        // Delete uploaded file if article not found
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
-        return res.status(404).json({ message: "Article not found" });
-      }
-
-      console.log("=== UPDATE REQUEST BODY ===", req.body);
-      console.log("=== UPDATE REQUEST FILE ===", req.file);
-
-      const {
-        reference,
-        designation,
-        pua_ttc,
-        puv_ttc,
-        pua_ht,
-        puv_ht,
-        tva,
-        taux_fodec,
-        type,
-        qte,
-        nom,
-        fournisseur_id,
-        categorie_id,
-        sous_categorie_id,
-      } = req.body;
-
-      // Store old image path for deletion if new image is uploaded
-      const oldImagePath = article.image;
-      if (fournisseur_id) {
-        const fournisseur = await fournisseurRepository.findOneBy({
-          id: parseInt(fournisseur_id),
-        });
-        if (!fournisseur) {
-          // Delete uploaded file if validation fails
-          if (req.file) {
-            fs.unlinkSync(req.file.path);
-          }
-          return res.status(400).json({ message: "Invalid fournisseur_id" });
-        }
-        article.fournisseur = fournisseur;
-      }
-
-      if (categorie_id) {
-        const categorie = await categorieRepository.findOneBy({
-          id: parseInt(categorie_id),
-        });
-        if (!categorie) {
-          // Delete uploaded file if validation fails
-          if (req.file) {
-            fs.unlinkSync(req.file.path);
-          }
-          return res.status(400).json({ message: "Invalid categorie_id" });
-        }
-        article.categorie = categorie;
-      }
-
-      // Handle subcategory
-      if (sous_categorie_id) {
-        const sousCategorie = await categorieRepository.findOneBy({
-          id: parseInt(sous_categorie_id),
-        });
-        article.sousCategorie = sousCategorie;
-      } else {
-        article.sousCategorie = null;
-      }
-
-      article.reference = reference ?? article.reference;
-      article.designation = designation ?? article.designation;
-      article.pua_ttc = pua_ttc ? parseFloat(pua_ttc) : article.pua_ttc;
-      article.puv_ttc = puv_ttc ? parseFloat(puv_ttc) : article.puv_ttc;
-      article.pua_ht = pua_ht ? parseFloat(pua_ht) : article.pua_ht;
-      article.puv_ht = puv_ht ? parseFloat(puv_ht) : article.puv_ht;
-      article.tva = tva ? parseInt(tva) : article.tva;
-      article.taux_fodec = taux_fodec
-        ? taux_fodec === "true" || taux_fodec === true
-        : article.taux_fodec;
-      article.type = type ?? article.type;
-      article.qte = qte ? parseInt(qte) : article.qte;
-      article.nom = nom ?? article.nom;
-
-      // Update image if new file is uploaded
-      if (req.file) {
-        article.image = req.file.path;
-        // Delete old image file
-        if (oldImagePath && fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-        }
-      }
-
-      const result = await articleRepository.save(article);
-
-      // Add full URL for image in response
-      if (result.image) {
-        result.image = `${req.protocol}://${req.get("host")}/${result.image}`;
-      }
-
-      res.json(result);
-    } catch (error) {
-      // Delete uploaded file if there's an error
-      if (req.file) {
-        fs.unlinkSync(req.file.path);
-      }
-      res.status(400).json({ message: error.message });
-    }
-  });
-};
 
 exports.getAllArticles = async (req, res) => {
   try {
@@ -341,7 +213,6 @@ exports.getArticleById = async (req, res) => {
 };
 
 exports.updateArticle = async (req, res) => {
-  // First, handle the file upload
   uploadMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
@@ -358,8 +229,7 @@ exports.updateArticle = async (req, res) => {
       });
 
       if (!article) {
-        // Delete uploaded file if article not found
-        if (req.file) {
+        if (req.file && fs.existsSync(req.file.path)) {
           fs.unlinkSync(req.file.path);
         }
         return res.status(404).json({ message: "Article not found" });
@@ -385,15 +255,30 @@ exports.updateArticle = async (req, res) => {
         sous_categorie_id,
       } = req.body;
 
-      // Store old image path for deletion if new image is uploaded
+      // CHECK IF REFERENCE ALREADY EXISTS (and it's not the current article)
+      if (reference && reference !== article.reference) {
+        const existingArticle = await articleRepository.findOne({
+          where: { reference: reference }
+        });
+
+        if (existingArticle) {
+          if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+          }
+          return res.status(400).json({ 
+            message: `La référence "${reference}" existe déjà. Veuillez utiliser une référence unique.` 
+          });
+        }
+      }
+
       const oldImagePath = article.image;
+      
       if (fournisseur_id) {
         const fournisseur = await fournisseurRepository.findOneBy({
           id: parseInt(fournisseur_id),
         });
         if (!fournisseur) {
-          // Delete uploaded file if validation fails
-          if (req.file) {
+          if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
           }
           return res.status(400).json({ message: "Invalid fournisseur_id" });
@@ -406,8 +291,7 @@ exports.updateArticle = async (req, res) => {
           id: parseInt(categorie_id),
         });
         if (!categorie) {
-          // Delete uploaded file if validation fails
-          if (req.file) {
+          if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
           }
           return res.status(400).json({ message: "Invalid categorie_id" });
@@ -415,7 +299,6 @@ exports.updateArticle = async (req, res) => {
         article.categorie = categorie;
       }
 
-      // Handle subcategory
       if (sous_categorie_id) {
         const sousCategorie = await categorieRepository.findOneBy({
           id: parseInt(sous_categorie_id),
@@ -439,10 +322,8 @@ exports.updateArticle = async (req, res) => {
       article.qte = qte ? parseInt(qte) : article.qte;
       article.nom = nom ?? article.nom;
 
-      // Update image if new file is uploaded
       if (req.file) {
         article.image = req.file.path;
-        // Delete old image file
         if (oldImagePath && fs.existsSync(oldImagePath)) {
           fs.unlinkSync(oldImagePath);
         }
@@ -450,15 +331,13 @@ exports.updateArticle = async (req, res) => {
 
       const result = await articleRepository.save(article);
 
-      // Add full URL for image in response
       if (result.image) {
         result.image = `${req.protocol}://${req.get("host")}/${result.image}`;
       }
 
       res.json(result);
     } catch (error) {
-      // Delete uploaded file if there's an error
-      if (req.file) {
+      if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
       res.status(400).json({ message: error.message });
@@ -468,47 +347,51 @@ exports.updateArticle = async (req, res) => {
 
 exports.deleteArticle = async (req, res) => {
   try {
-    const result = await AppDataSource.getRepository(Article).delete(
-      req.params.id
-    );
+    const articleRepository = AppDataSource.getRepository(Article);
+    const articleId = req.params.id;
 
-    if (result.affected === 0) {
-      return res.status(404).json({ message: "Article not found" });
-    }
-
-    res.status(204).send();
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-exports.getAllArticles = async (req, res) => {
-  try {
-    const articles = await AppDataSource.getRepository(Article).find({
-      relations: ["categorie", "fournisseur", "sousCategorie"],
-    });
-    res.json(articles);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-exports.getArticleById = async (req, res) => {
-  try {
-    const article = await AppDataSource.getRepository(Article).findOne({
-      where: { id: parseInt(req.params.id) },
-      relations: ["categorie", "fournisseur"],
+    // First, check if the article exists
+    const article = await articleRepository.findOne({
+      where: { id: articleId }
     });
 
     if (!article) {
       return res.status(404).json({ message: "Article not found" });
     }
 
-    res.json(article);
+    // Try to delete the article
+    try {
+      const result = await articleRepository.delete(articleId);
+      
+      if (result.affected === 0) {
+        return res.status(404).json({ message: "Article not found" });
+      }
+      
+      // Successfully deleted
+      return res.status(204).send();
+      
+    } catch (deleteError) {
+      // If delete fails (likely due to foreign key constraints - article used in facture/bon commande)
+      // Deactivate the article instead
+      await articleRepository.update(articleId, { 
+        active: false 
+      });
+      
+      return res.status(200).json({ 
+        message: "Article cannot be deleted as it's used in invoices or purchase orders. It has been deactivated instead.",
+        deactivated: true 
+      });
+    }
+
   } catch (error) {
+    console.error('Error processing article:', error);
     res.status(500).json({ message: error.message });
   }
 };
+
+
+
+
 
 exports.updateArticleWebsiteSettings = async (req, res) => {
   try {
@@ -692,7 +575,7 @@ exports.searchArticles = async (req, res) => {
 
     const repo = AppDataSource.getRepository(Article);
 
-    // --- Query only the safe fields ---
+    // --- Build query with active filter ---
     const qb = repo.createQueryBuilder("article")
       .select([
         "article.id",
@@ -703,13 +586,16 @@ exports.searchArticles = async (req, res) => {
         "article.puv_ht",
         "article.puv_ttc",
         "article.tva",
-
+        "article.active",
       ]);
 
-    // --- Search by reference or designation ---
+    // Always filter active articles first
+    qb.where("article.active = :active", { active: true });
+
+    // Add search condition if query exists
     if (q !== "") {
-      qb.where(
-        "article.reference ILIKE :term OR article.designation ILIKE :term",
+      qb.andWhere(
+        "(article.reference ILIKE :term OR article.designation ILIKE :term)",
         { term: `%${q}%` }
       );
     }
@@ -743,5 +629,4 @@ exports.searchArticles = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
 

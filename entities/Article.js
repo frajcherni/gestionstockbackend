@@ -30,6 +30,11 @@ const Article = new EntitySchema({
         website_description: { type: "text", nullable: true },
         website_images: { type: "simple-array", nullable: true },
         website_order: { type: "int", default: 0, nullable: true },
+           active: { 
+        type: "boolean", 
+        default: true, 
+        nullable: false 
+    },
     },
     relations: {
         categorie: {
