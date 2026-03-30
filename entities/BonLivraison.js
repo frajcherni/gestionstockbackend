@@ -28,6 +28,39 @@ const BonLivraison = new EntitySchema({
       enum: ["HT", "TTC"],
       default: "HT",
     },
+    totalHT: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    totalTVA: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    totalTTC: { type: "decimal", precision: 12, scale: 3, default: 0 },
+    totalTTCAfterRemise: {
+      type: "decimal",
+      precision: 12,
+      scale: 3,
+      default: 0,
+    },
+
+    resteAPayer: { type: "decimal", precision: 12, scale: 3, default: 0 },
+
+    // Champs de paiement
+    montantPaye: { type: "decimal", precision: 12, scale: 3, default: 0 },
+
+    hasPayments: { type: "boolean", default: false },
+    totalPaymentAmount: {
+      type: "decimal",
+      precision: 12,
+      scale: 3,
+      default: 0,
+    },
+    espaceNotes: { type: "text", nullable: true },
+
+    hasRetenue: { type: "boolean", default: false },
+    montantRetenue: { type: "decimal", precision: 12, scale: 3, default: 0 },
+
+    // Stocker les méthodes de paiement en JSON
+    paymentMethods: {
+      type: "json",
+      nullable: true,
+      default: null,
+    },
     createdAt: { type: "timestamp", createDate: true },
     updatedAt: { type: "timestamp", updateDate: true },
   },
@@ -56,6 +89,16 @@ const BonLivraison = new EntitySchema({
       inverseSide: "bonLivraison",
       cascade: true,
       eager: true,
+    },
+    paiements: {
+      type: "one-to-many",
+      target: "PaiementClient",
+      inverseSide: "bonLivraison",
+    },
+    factures: {
+      type: "one-to-many",
+      target: "FactureClient",
+      inverseSide: "bonLivraison",
     },
   },
 });

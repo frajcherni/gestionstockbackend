@@ -8,12 +8,13 @@ const PaiementClient = new EntitySchema({
     montant: { type: "decimal", precision: 12, scale: 3 },
     modePaiement: {
       type: "enum",
-      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre" , "Retention" , "tpe" , "Carte Bancaire TPE"],
+      enum: ["Espece", "Cheque", "Virement", "Traite", "Autre", "Retention", "tpe", "Carte Bancaire TPE"],
     },
     numeroPaiement: { type: "varchar", length: 100, nullable: true },
     date: { type: "date" },
     client_id: { type: "int", nullable: true },
     bonCommandeClient_id: { type: "int", nullable: true },
+    bonLivraison_id: { type: "int", nullable: true },
     // Add new fields for cheque
     numeroCheque: { type: "varchar", length: 100, nullable: true },
     banque: { type: "varchar", length: 100, nullable: true },
@@ -35,6 +36,13 @@ const PaiementClient = new EntitySchema({
       type: "many-to-one",
       target: "BonCommandeClient",
       joinColumn: { name: "bonCommandeClient_id" },
+      nullable: true,
+      onDelete: "SET NULL",
+    },
+    bonLivraison: {
+      type: "many-to-one",
+      target: "BonLivraison",
+      joinColumn: { name: "bonLivraison_id" },
       nullable: true,
       onDelete: "SET NULL",
     },

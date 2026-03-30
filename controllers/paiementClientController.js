@@ -1,6 +1,7 @@
 const { AppDataSource } = require("../db");
 const { PaiementClient } = require("../entities/PaiementClient");
 const { BonCommandeClient } = require("../entities/BonCommandeClient");
+const { BonLivraison } = require("../entities/BonLivraison");
 const { Client } = require("../entities/Client");
 
 
@@ -14,6 +15,7 @@ exports.createPaiement = async (req, res) => {
       date,
       client_id,
       bonCommandeClient_id,
+      bonLivraison_id,
       numeroCheque,
       banque,
       numeroTraite,
@@ -34,10 +36,15 @@ exports.createPaiement = async (req, res) => {
         ? Number(bonCommandeClient_id)
         : null;
 
+    bonLivraison_id =
+      bonLivraison_id && !isNaN(Number(bonLivraison_id)) && Number(bonLivraison_id) > 0
+        ? Number(bonLivraison_id)
+        : null;
+
     montant = montant && !isNaN(Number(montant)) ? Number(montant) : 0;
 
     // Validate modePaiement
-    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Retention", "Autre" , "tpe" , "Carte Bancaire TPE"];
+    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Retention", "Autre", "tpe", "Carte Bancaire TPE"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
     }
@@ -81,6 +88,16 @@ exports.createPaiement = async (req, res) => {
       }
     }
 
+    // Validate bonLivraison_id if provided
+    let bonLivraison = null;
+    if (bonLivraison_id) {
+      const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
+      bonLivraison = await bonLivraisonRepo.findOneBy({ id: bonLivraison_id });
+      if (!bonLivraison) {
+        return res.status(404).json({ error: "Bon de livraison non trouvé" });
+      }
+    }
+
     const paiementRepo = AppDataSource.getRepository(PaiementClient);
     const newPaiement = paiementRepo.create({
       montant,
@@ -89,6 +106,7 @@ exports.createPaiement = async (req, res) => {
       date,
       client_id,
       bonCommandeClient_id,
+      bonLivraison_id,   // ← was missing — caused bonLivraison_id to always save as null
       numeroCheque,
       banque,
       numeroTraite,
@@ -104,8 +122,8 @@ exports.createPaiement = async (req, res) => {
       const allPaiements = await paiementRepo.find({
         where: { bonCommandeClient_id: bonCommande.id }
       });
-      
-      const totalPaiements = allPaiements.reduce((sum, paiement) => 
+
+      const totalPaiements = allPaiements.reduce((sum, paiement) =>
         sum + Number(paiement.montant), 0
       );
 
@@ -114,14 +132,34 @@ exports.createPaiement = async (req, res) => {
       bonCommande.resteAPayer = (
         Number(bonCommande.totalTTCAfterRemise || bonCommande.totalTTC || 0) - totalPaiements
       ).toFixed(3);
-      
+
       await AppDataSource.getRepository(BonCommandeClient).save(bonCommande);
+    }
+
+    // Update bon livraison totals if linked
+    if (bonLivraison) {
+      // Calculate total payments for this bon livraison
+      const allPaiements = await paiementRepo.find({
+        where: { bonLivraison_id: bonLivraison.id }
+      });
+
+      const totalPaiements = allPaiements.reduce((sum, paiement) =>
+        sum + Number(paiement.montant), 0
+      );
+
+      // Update bon livraison payment information
+      bonLivraison.montantPaye = totalPaiements.toFixed(3);
+      bonLivraison.resteAPayer = (
+        Number(bonLivraison.totalTTCAfterRemise || bonLivraison.totalTTC || 0) - totalPaiements
+      ).toFixed(3);
+
+      await AppDataSource.getRepository(BonLivraison).save(bonLivraison);
     }
 
     // Fetch the saved paiement with relations
     const result = await paiementRepo.findOne({
       where: { id: savedPaiement.id },
-      relations: ["client", "bonCommandeClient"],
+      relations: ["client", "bonCommandeClient", "bonLivraison"],
     });
 
     res.status(201).json(result);
@@ -136,7 +174,22 @@ exports.getPaiementsByBonCommande = async (req, res) => {
     const paiementRepo = AppDataSource.getRepository(PaiementClient);
     const paiements = await paiementRepo.find({
       where: { bonCommandeClient_id: Number(req.params.bonCommandeId) },
-      relations: ["client", "bonCommandeClient"],
+      relations: ["client", "bonCommandeClient", "bonLivraison"],
+      order: { date: "ASC" },
+    });
+    res.json(paiements);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des paiements:", err);
+    res.status(500).json({ error: "Erreur lors de la récupération des paiements" });
+  }
+};
+
+exports.getPaiementsByBonLivraison = async (req, res) => {
+  try {
+    const paiementRepo = AppDataSource.getRepository(PaiementClient);
+    const paiements = await paiementRepo.find({
+      where: { bonLivraison_id: Number(req.params.bonLivraisonId) },
+      relations: ["client", "bonCommandeClient", "bonLivraison"],
       order: { date: "ASC" },
     });
     res.json(paiements);
@@ -151,7 +204,7 @@ exports.deletePaiement = async (req, res) => {
     const paiementRepo = AppDataSource.getRepository(PaiementClient);
     const paiement = await paiementRepo.findOne({
       where: { id: Number(req.params.id) },
-      relations: ["bonCommandeClient"],
+      relations: ["bonCommandeClient", "bonLivraison"],
     });
     if (!paiement)
       return res.status(404).json({ error: "Paiement non trouvé" });
@@ -167,17 +220,48 @@ exports.deletePaiement = async (req, res) => {
         const remainingPaiements = await paiementRepo.find({
           where: { bonCommandeClient_id: bonCommande.id }
         });
-        
-        const totalPaiements = remainingPaiements.reduce((sum, p) => 
-          sum + Number(p.montant), 0
-        ) - Number(paiement.montant); // Subtract the deleted payment
+
+        const totalPaiements = remainingPaiements.reduce((sum, p) => {
+          if (p.id !== paiement.id) {
+            return sum + Number(p.montant);
+          }
+          return sum;
+        }, 0);
 
         bonCommande.montantPaye = Math.max(0, totalPaiements).toFixed(3);
         bonCommande.resteAPayer = (
           Number(bonCommande.totalTTCAfterRemise || bonCommande.totalTTC || 0) - totalPaiements
         ).toFixed(3);
-        
+
         await bonCommandeRepo.save(bonCommande);
+      }
+    }
+
+    // Update bon livraison totals if linked
+    if (paiement.bonLivraison_id) {
+      const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
+      const bonLivraison = await bonLivraisonRepo.findOneBy({
+        id: paiement.bonLivraison_id,
+      });
+      if (bonLivraison) {
+        // Recalculate total payments after deletion
+        const remainingPaiements = await paiementRepo.find({
+          where: { bonLivraison_id: bonLivraison.id }
+        });
+
+        const totalPaiements = remainingPaiements.reduce((sum, p) => {
+          if (p.id !== paiement.id) {
+            return sum + Number(p.montant);
+          }
+          return sum;
+        }, 0);
+
+        bonLivraison.montantPaye = Math.max(0, totalPaiements).toFixed(3);
+        bonLivraison.resteAPayer = (
+          Number(bonLivraison.totalTTCAfterRemise || bonLivraison.totalTTC || 0) - totalPaiements
+        ).toFixed(3);
+
+        await bonLivraisonRepo.save(bonLivraison);
       }
     }
 
@@ -219,10 +303,15 @@ exports.updatePaiement = async (req, res) => {
         ? Number(bonCommandeClient_id)
         : null;
 
+    bonLivraison_id =
+      bonLivraison_id && !isNaN(Number(bonLivraison_id)) && Number(bonLivraison_id) > 0
+        ? Number(bonLivraison_id)
+        : null;
+
     montant = montant && !isNaN(Number(montant)) ? Number(montant) : 0;
 
     // Validate modePaiement
-    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Retention", "Autre" , "tpe"];
+    const allowedModes = ["Espece", "Cheque", "Virement", "Traite", "Retention", "Autre", "tpe"];
     if (!allowedModes.includes(modePaiement)) {
       return res.status(400).json({ error: "Mode de paiement invalide" });
     }
@@ -247,11 +336,11 @@ exports.updatePaiement = async (req, res) => {
     }
 
     const paiementRepo = AppDataSource.getRepository(PaiementClient);
-    
+
     // Find existing paiement with relations
     const existingPaiement = await paiementRepo.findOne({
       where: { id: Number(id) },
-      relations: ["bonCommandeClient"],
+      relations: ["bonCommandeClient", "bonLivraison"],
     });
 
     if (!existingPaiement) {
@@ -286,17 +375,39 @@ exports.updatePaiement = async (req, res) => {
         const newTotalPaiements = totalWithoutCurrent + newMontant;
         const bonCommandeTotal = Number(bonCommande.totalTTCAfterRemise || bonCommande.totalTTC || 0);
 
-        // Validate that new payment amount doesn't exceed total
-        if (newTotalPaiements > bonCommandeTotal) {
-          return res.status(400).json({ 
-            error: `Le montant total payé (${newTotalPaiements.toFixed(3)} DT) ne peut pas dépasser le total du bon de commande (${bonCommandeTotal.toFixed(3)} DT)` 
-          });
-        }
-
         bonCommande.montantPaye = newTotalPaiements.toFixed(3);
         bonCommande.resteAPayer = (bonCommandeTotal - newTotalPaiements).toFixed(3);
 
         await bonCommandeRepo.save(bonCommande);
+      }
+    }
+
+    // Update bon livraison totals if linked
+    if (existingPaiement.bonLivraison_id) {
+      const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
+      const bonLivraison = await bonLivraisonRepo.findOneBy({
+        id: existingPaiement.bonLivraison_id,
+      });
+
+      if (bonLivraison) {
+        const allPaiements = await paiementRepo.find({
+          where: { bonLivraison_id: bonLivraison.id }
+        });
+
+        const totalWithoutCurrent = allPaiements.reduce((sum, p) => {
+          if (p.id !== existingPaiement.id) {
+            return sum + Number(p.montant);
+          }
+          return sum;
+        }, 0);
+
+        const newTotalPaiements = totalWithoutCurrent + newMontant;
+        const bonLivraisonTotal = Number(bonLivraison.totalTTCAfterRemise || bonLivraison.totalTTC || 0);
+
+        bonLivraison.montantPaye = newTotalPaiements.toFixed(3);
+        bonLivraison.resteAPayer = (bonLivraisonTotal - newTotalPaiements).toFixed(3);
+
+        await bonLivraisonRepo.save(bonLivraison);
       }
     }
 
@@ -308,6 +419,7 @@ exports.updatePaiement = async (req, res) => {
       date,
       client_id,
       bonCommandeClient_id,
+      bonLivraison_id,
       numeroCheque,
       banque,
       numeroTraite,
@@ -318,7 +430,7 @@ exports.updatePaiement = async (req, res) => {
     // Fetch the updated paiement with relations
     const updatedPaiement = await paiementRepo.findOne({
       where: { id: Number(id) },
-      relations: ["client", "bonCommandeClient"],
+      relations: ["client", "bonCommandeClient", "bonLivraison"],
     });
 
     res.json(updatedPaiement);
@@ -332,7 +444,7 @@ exports.getAllPaiements = async (req, res) => {
   try {
     const paiementRepo = AppDataSource.getRepository(PaiementClient);
     const paiements = await paiementRepo.find({
-      relations: ["client", "bonCommandeClient"],
+      relations: ["client", "bonCommandeClient", "bonLivraison"],
       order: { date: "DESC" },
     });
     res.json(paiements);

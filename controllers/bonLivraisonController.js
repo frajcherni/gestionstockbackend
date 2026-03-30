@@ -29,6 +29,12 @@ exports.createBonLivraison = async (req, res) => {
       articles,
       taxMode,
       livraisonInfo,
+      totalHT,
+      totalTVA,
+      totalTTC,
+      totalTTCAfterRemise,
+      paymentMethods,
+      espaceNotes,
     } = req.body;
 
     const clientRepo = queryRunner.manager.getRepository(Client);
@@ -265,6 +271,30 @@ exports.createBonLivraison = async (req, res) => {
         .json({ message: "Aucune quantité à livrer spécifiée" });
     }
 
+    const hasPayments = paymentMethods && paymentMethods.length > 0;
+
+    // CHECK IF THERE'S A RETENUE PAYMENT METHOD
+    const hasRetenue = hasPayments && paymentMethods.some(pm => pm.method === "retenue");
+
+    // CALCULATE RETENTION AMOUNT
+    let montantRetenue = 0;
+    if (hasRetenue) {
+      const retenueMethod = paymentMethods.find(pm => pm.method === "retenue");
+      const tauxRetention = retenueMethod.tauxRetention || 1;
+      montantRetenue = (parseFloat(totalTTCAfterRemise || totalTTC || 0) * tauxRetention) / 100;
+    }
+
+    // CALCULATE TOTAL PAYMENT AMOUNT (EXCLUDE RETENUE FROM ACTUAL PAYMENTS)
+    const actualPaymentAmount = hasPayments
+      ? paymentMethods
+        .filter(pm => pm.method !== "retenue")
+        .reduce((sum, pm) => sum + (parseFloat(pm.amount) || 0), 0)
+      : 0;
+
+    // CALCULATE RESTE A PAYER (SUBTRACT RETENTION FROM TOTAL)
+    const totalNet = parseFloat(totalTTCAfterRemise || totalTTC || 0);
+    const resteAPayer = totalNet - montantRetenue - actualPaymentAmount;
+
     // Create BL
     const bonLivraison = {
       numeroLivraison,
@@ -278,6 +308,18 @@ exports.createBonLivraison = async (req, res) => {
       taxMode,
       bonCommandeClient: bonCommandeClient_id ? bonCommandeClient : null,
       ...deliveryData,
+      totalHT: parseFloat(totalHT || 0),
+      totalTVA: parseFloat(totalTVA || 0),
+      totalTTC: parseFloat(totalTTC || 0),
+      totalTTCAfterRemise: parseFloat(totalTTCAfterRemise || totalTTC || 0),
+      paymentMethods: hasPayments ? paymentMethods : null,
+      totalPaymentAmount: actualPaymentAmount,
+      montantPaye: actualPaymentAmount,
+      resteAPayer: Math.max(0, resteAPayer),
+      hasPayments: hasPayments && actualPaymentAmount > 0,
+      espaceNotes: espaceNotes || null,
+      hasRetenue: hasRetenue,
+      montantRetenue: montantRetenue,
       articles: finalArticles,
     };
 
@@ -348,6 +390,12 @@ exports.updateBonLivraison = async (req, res) => {
       chauffeur,
       cin,
       livraisonInfo, // Handle both direct fields and nested object
+      totalHT,
+      totalTVA,
+      totalTTC,
+      totalTTCAfterRemise,
+      paymentMethods,
+      espaceNotes,
     } = req.body;
 
     // Update basic information
@@ -365,29 +413,64 @@ exports.updateBonLivraison = async (req, res) => {
       voiture !== undefined
         ? voiture
         : livraisonInfo && livraisonInfo.voiture !== undefined
-        ? livraisonInfo.voiture
-        : bon.voiture;
+          ? livraisonInfo.voiture
+          : bon.voiture;
 
     bon.serie =
       serie !== undefined
         ? serie
         : livraisonInfo && livraisonInfo.serie !== undefined
-        ? livraisonInfo.serie
-        : bon.serie;
+          ? livraisonInfo.serie
+          : bon.serie;
 
     bon.chauffeur =
       chauffeur !== undefined
         ? chauffeur
         : livraisonInfo && livraisonInfo.chauffeur !== undefined
-        ? livraisonInfo.chauffeur
-        : bon.chauffeur;
+          ? livraisonInfo.chauffeur
+          : bon.chauffeur;
 
     bon.cin =
       cin !== undefined
         ? cin
         : livraisonInfo && livraisonInfo.cin !== undefined
-        ? livraisonInfo.cin
-        : bon.cin;
+          ? livraisonInfo.cin
+          : bon.cin;
+
+    const hasPayments = paymentMethods && paymentMethods.length > 0;
+    const hasRetenue = hasPayments && paymentMethods.some(pm => pm.method === "retenue");
+
+    let montantRetenue = 0;
+    const currentTotalTTC = totalTTCAfterRemise || totalTTC || bon.totalTTCAfterRemise || bon.totalTTC || 0;
+    if (hasRetenue) {
+      const retenueMethod = paymentMethods.find(pm => pm.method === "retenue");
+      const tauxRetention = retenueMethod.tauxRetention || 1;
+      montantRetenue = (parseFloat(currentTotalTTC) * tauxRetention) / 100;
+    }
+
+    const actualPaymentAmount = hasPayments
+      ? paymentMethods
+        .filter(pm => pm.method !== "retenue")
+        .reduce((sum, pm) => sum + (parseFloat(pm.amount) || 0), 0)
+      : 0;
+
+    const totalNet = parseFloat(currentTotalTTC);
+    const resteAPayer = totalNet - montantRetenue - actualPaymentAmount;
+
+    // Update totals and payments
+    if (totalHT !== undefined) bon.totalHT = parseFloat(totalHT);
+    if (totalTVA !== undefined) bon.totalTVA = parseFloat(totalTVA);
+    if (totalTTC !== undefined) bon.totalTTC = parseFloat(totalTTC);
+    if (totalTTCAfterRemise !== undefined) bon.totalTTCAfterRemise = parseFloat(totalTTCAfterRemise);
+
+    bon.paymentMethods = hasPayments ? paymentMethods : null;
+    bon.totalPaymentAmount = actualPaymentAmount;
+    bon.montantPaye = actualPaymentAmount;
+    bon.resteAPayer = Math.max(0, resteAPayer);
+    bon.hasPayments = hasPayments && actualPaymentAmount > 0;
+    bon.hasRetenue = hasRetenue;
+    bon.montantRetenue = montantRetenue;
+    if (espaceNotes !== undefined) bon.espaceNotes = espaceNotes;
 
     console.log("Updated delivery info:", {
       voiture: bon.voiture,
@@ -818,6 +901,8 @@ exports.getAllBonLivraisons = async (req, res) => {
         "articles",
         "articles.article",
         "bonCommandeClient",
+        "paiements",
+        "factures",
       ],
       order: {
         dateLivraison: "DESC",
@@ -842,6 +927,8 @@ exports.getBonLivraisonById = async (req, res) => {
         "articles",
         "articles.article",
         "bonCommandeClient",
+        "paiements",
+        "factures",
       ],
     });
 

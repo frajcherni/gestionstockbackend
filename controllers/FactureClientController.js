@@ -19,6 +19,7 @@ exports.getAllFacturesClient = async (req, res) => {
         "client",
         "vendeur",
         "bonLivraison",
+        "bonLivraison.paiements", // ADD THIS
         "bonCommandeClient",
         "venteComptoire", // ADD THIS
         "bonCommandeClient.paiements", // ADD THIS TOO
@@ -92,7 +93,7 @@ exports.createFactureClient = async (req, res) => {
       montantRetenue = 0,
       hasRetenue = false,
     } = req.body;
-  console.log(exoneration)
+    console.log(exoneration)
     const clientRepo = AppDataSource.getRepository(Client);
     const vendeurRepo = AppDataSource.getRepository(Vendeur);
     const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
@@ -107,10 +108,10 @@ exports.createFactureClient = async (req, res) => {
         .status(400)
         .json({ message: "Les champs obligatoires sont manquants" });
     }
-    
+
     console.log("boncommandeclientid:", boncommandeclientid);
     console.log("venteComptoire_id:", venteComptoire_id); // ADD THIS: Debug log
-    
+
     // Check if numeroFacture is unique
     const existingFacture = await factureRepo.findOne({
       where: { numeroFacture },
@@ -208,7 +209,7 @@ exports.createFactureClient = async (req, res) => {
       articles: [],
     };
 
-    console.log("Creating facture:",facture);
+    console.log("Creating facture:", facture);
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
       return res.status(400).json({ message: "Les articles sont requis" });
@@ -244,7 +245,7 @@ exports.createFactureClient = async (req, res) => {
         quantite: parseInt(item.quantite),
         prixUnitaire: prixUnitaire,
         prix_ttc: +prix_ttc.toFixed(3),
-  designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
+        designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : 0,
       };
@@ -364,8 +365,8 @@ exports.updateFactureClient = async (req, res) => {
           quantite: parseInt(item.quantite),
           prixUnitaire: prixUnitaire,
           prix_ttc: +prix_ttc.toFixed(3),
-  designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
- // Use the TTC value from frontend
+          designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
+          // Use the TTC value from frontend
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : 0,
         };

@@ -18,6 +18,11 @@ router.get(
   paiementClientController.getPaiementsByBonCommande
 );
 
+router.get(
+  "/bon-livraison/:bonLivraisonId",
+  paiementClientController.getPaiementsByBonLivraison
+);
+
 // Get payment by ID
 //router.get("/:id", paiementClientController.getPaiementById);
 
