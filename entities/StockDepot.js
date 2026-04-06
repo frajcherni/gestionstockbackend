@@ -8,12 +8,12 @@ const StockDepot = new EntitySchema({
     id: { type: "int", primary: true, generated: true },
     article_id: { type: "int" },
     depot_id: { type: "int" },
-    qte: { type: "decimal", precision: 10, scale: 2, default: 0 }, 
-        created_at: { type: "timestamp", default: () => "CURRENT_TIMESTAMP" },
-    updated_at: { 
-      type: "timestamp", 
+    qte: { type: "int", default: 0 },
+    created_at: { type: "timestamp", default: () => "CURRENT_TIMESTAMP" },
+    updated_at: {
+      type: "timestamp",
       default: () => "CURRENT_TIMESTAMP",
-      onUpdate: "CURRENT_TIMESTAMP" 
+      onUpdate: "CURRENT_TIMESTAMP"
     }
   },
   indices: [
