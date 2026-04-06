@@ -8,13 +8,12 @@ const InventaireItem = new EntitySchema({
     id: { type: "int", primary: true, generated: true },
     inventaire_id: { type: "int", nullable: true },
     article_id: { type: "int", nullable: true },
-// CORRECT - should be "decimal"
-qte_avant: { type: "decimal", precision: 10, scale: 2, nullable: true },
-qte_reel: { type: "decimal", precision: 10, scale: 2, nullable: true },
-qte_ajustement: { type: "decimal", precision: 10, scale: 2, nullable: true },
+    qte_avant: { type: "decimal", precision: 10, scale: 2, nullable: true },
+    qte_reel: { type: "decimal", precision: 10, scale: 2, nullable: true },
+    qte_ajustement: { type: "decimal", precision: 10, scale: 2, nullable: true },
 
 
-    
+
     ligne_numero: { type: "int", nullable: true }, // Counted quantity
     tva: { type: "decimal", precision: 5, scale: 2, nullable: true },
 

@@ -710,3 +710,561 @@ exports.getTrésorerieData = async (req, res) => {
         });
     }
 };
+
+
+// dashboardController.js
+const {  BonCommandeClientArticle } = require("../entities/BonCommandeClient");
+const { DevisClient, DevisClientArticle } = require("../entities/Devis");
+
+
+/**
+ * Get dashboard statistics between two dates
+ * @param {Date} startDate - Start date for filtering
+ * @param {Date} endDate - End date for filtering
+ * @returns {Object} Aggregated dashboard data
+ */
+exports.getDashboardDataByDateRange = async (req, res) => {
+    try {
+        const { startDate, endDate } = req.query;
+
+        // Validate date inputs
+        if (!startDate || !endDate) {
+            return res.status(400).json({
+                message: "Les dates de début et de fin sont requises"
+            });
+        }
+
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); // Include the entire end day
+
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            return res.status(400).json({
+                message: "Format de date invalide"
+            });
+        }
+
+        // Execute all queries in parallel for better performance
+        const [
+            commandesData,
+            livraisonsData,
+            facturesData,
+            devisData,
+            ventesComptoireData,
+            topProductsData,
+            topClientsData,
+            monthlyTrendsData
+        ] = await Promise.all([
+            getCommandesStats(start, end),
+            getLivraisonsStats(start, end),
+            getFacturesStats(start, end),
+            getDevisStats(start, end),
+            getVentesComptoireStats(start, end),
+            getTopProducts(start, end),
+            getTopClients(start, end),
+            getMonthlyTrends(start, end)
+        ]);
+
+        // Calculate summary statistics
+        const summary = {
+            totalCommandes: commandesData.total,
+            totalLivraisons: livraisonsData.total,
+            totalFactures: facturesData.total,
+            totalDevis: devisData.total,
+            totalVentesComptoire: ventesComptoireData.total,
+            chiffreAffaires: facturesData.totalTTC + ventesComptoireData.totalTTC,
+            totalTTC: facturesData.totalTTC + ventesComptoireData.totalTTC,
+            totalHT: facturesData.totalHT + ventesComptoireData.totalHT,
+            totalTVA: facturesData.totalTVA + ventesComptoireData.totalTVA,
+            totalRemises: facturesData.totalRemises + ventesComptoireData.totalRemises,
+            totalPaymentsReceived: facturesData.totalPayments + ventesComptoireData.totalPayments,
+            totalPendingPayments: (facturesData.totalTTC + ventesComptoireData.totalTTC) -
+                (facturesData.totalPayments + ventesComptoireData.totalPayments),
+            totalArticlesVendus: commandesData.totalArticles + ventesComptoireData.totalArticles
+        };
+
+        res.json({
+            success: true,
+            period: {
+                startDate: start,
+                endDate: end
+            },
+            summary,
+            details: {
+                commandes: commandesData,
+                livraisons: livraisonsData,
+                factures: facturesData,
+                devis: devisData,
+                ventesComptoire: ventesComptoireData,
+                topProducts: topProductsData,
+                topClients: topClientsData,
+                monthlyTrends: monthlyTrendsData
+            }
+        });
+
+    } catch (error) {
+        console.error("Dashboard error:", error);
+        res.status(500).json({
+            message: "Erreur lors de la récupération des données du tableau de bord",
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get commandes client statistics between dates
+ */
+async function getCommandesStats(startDate, endDate) {
+    const repo = AppDataSource.getRepository(BonCommandeClient);
+
+    const [commandes, total, totalTTC, totalHT, totalTVA, totalArticles] = await Promise.all([
+        repo.find({
+            where: {
+                dateCommande: Between(startDate, endDate)
+            },
+            relations: ["client", "vendeur", "articles", "articles.article"],
+            order: { dateCommande: "DESC" }
+        }),
+        repo.count({
+            where: { dateCommande: Between(startDate, endDate) }
+        }),
+        repo.createQueryBuilder("bc")
+            .select("SUM(bc.totalTTCAfterRemise)", "total")
+            .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("bc")
+            .select("SUM(bc.totalHT)", "total")
+            .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("bc")
+            .select("SUM(bc.totalTVA)", "total")
+            .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("bc")
+            .leftJoin("bc.articles", "articles")
+            .select("SUM(articles.quantite)", "total")
+            .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne()
+    ]);
+
+    // Group by status
+    const byStatus = await repo.createQueryBuilder("bc")
+        .select("bc.status", "status")
+        .addSelect("COUNT(*)", "count")
+        .addSelect("SUM(bc.totalTTCAfterRemise)", "totalTTC")
+        .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("bc.status")
+        .getRawMany();
+
+    return {
+        commandes,
+        total: total || 0,
+        totalTTC: parseFloat(totalTTC?.total) || 0,
+        totalHT: parseFloat(totalHT?.total) || 0,
+        totalTVA: parseFloat(totalTVA?.total) || 0,
+        totalArticles: parseInt(totalArticles?.total) || 0,
+        byStatus
+    };
+}
+
+/**
+ * Get livraisons statistics between dates
+ */
+async function getLivraisonsStats(startDate, endDate) {
+    const repo = AppDataSource.getRepository(BonLivraison);
+
+    const [livraisons, total, totalTTC, totalArticles] = await Promise.all([
+        repo.find({
+            where: {
+                dateLivraison: Between(startDate, endDate)
+            },
+            relations: ["client", "vendeur", "bonCommandeClient", "articles", "articles.article"],
+            order: { dateLivraison: "DESC" }
+        }),
+        repo.count({
+            where: { dateLivraison: Between(startDate, endDate) }
+        }),
+        repo.createQueryBuilder("bl")
+            .select("SUM(bl.totalTTCAfterRemise)", "total")
+            .where("bl.dateLivraison BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("bl")
+            .leftJoin("bl.articles", "articles")
+            .select("SUM(articles.quantite)", "total")
+            .where("bl.dateLivraison BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne()
+    ]);
+
+    return {
+        livraisons,
+        total: total || 0,
+        totalTTC: parseFloat(totalTTC?.total) || 0,
+        totalArticles: parseInt(totalArticles?.total) || 0
+    };
+}
+
+/**
+ * Get factures statistics between dates
+ */
+async function getFacturesStats(startDate, endDate) {
+    const repo = AppDataSource.getRepository(FactureClient);
+
+    const [factures, total, totalTTC, totalHT, totalTVA, totalPayments, totalRemises] = await Promise.all([
+        repo.find({
+            where: {
+                dateFacture: Between(startDate, endDate)
+            },
+            relations: ["client", "vendeur", "bonLivraison", "bonCommandeClient", "articles", "articles.article"],
+            order: { dateFacture: "DESC" }
+        }),
+        repo.count({
+            where: { dateFacture: Between(startDate, endDate) }
+        }),
+        repo.createQueryBuilder("f")
+            .select("SUM(f.totalTTCAfterRemise)", "total")
+            .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("f")
+            .select("SUM(f.totalHT)", "total")
+            .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("f")
+            .select("SUM(f.totalTVA)", "total")
+            .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("f")
+            .select("SUM(f.montantPaye)", "total")
+            .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("f")
+            .select("SUM(f.remise)", "total")
+            .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne()
+    ]);
+
+    // Group by status
+    const byStatus = await repo.createQueryBuilder("f")
+        .select("f.status", "status")
+        .addSelect("COUNT(*)", "count")
+        .addSelect("SUM(f.totalTTCAfterRemise)", "totalTTC")
+        .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("f.status")
+        .getRawMany();
+
+    return {
+        factures,
+        total: total || 0,
+        totalTTC: parseFloat(totalTTC?.total) || 0,
+        totalHT: parseFloat(totalHT?.total) || 0,
+        totalTVA: parseFloat(totalTVA?.total) || 0,
+        totalPayments: parseFloat(totalPayments?.total) || 0,
+        totalRemises: parseFloat(totalRemises?.total) || 0,
+        byStatus
+    };
+}
+
+/**
+ * Get devis statistics between dates
+ */
+async function getDevisStats(startDate, endDate) {
+    const repo = AppDataSource.getRepository(DevisClient);
+
+    const [devis, total, totalTTC, conversionRate] = await Promise.all([
+        repo.find({
+            where: {
+                dateCommande: Between(startDate, endDate)
+            },
+            relations: ["client", "vendeur", "articles", "articles.article"],
+            order: { dateCommande: "DESC" }
+        }),
+        repo.count({
+            where: { dateCommande: Between(startDate, endDate) }
+        }),
+        repo.createQueryBuilder("d")
+            .select("SUM(d.totalTTCAfterRemise)", "total")
+            .where("d.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        // Calculate conversion rate (devis converted to commandes)
+        AppDataSource.createQueryBuilder()
+            .select("COUNT(DISTINCT d.id)", "totalDevis")
+            .addSelect("COUNT(DISTINCT bc.id)", "totalCommandes")
+            .from(DevisClient, "d")
+            .leftJoin(BonCommandeClient, "bc", "bc.numeroCommande = d.numeroCommande")
+            .where("d.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne()
+    ]);
+
+    const convertedCount = conversionRate?.totalCommandes || 0;
+    const devisCount = conversionRate?.totalDevis || 0;
+    const rate = devisCount > 0 ? (convertedCount / devisCount) * 100 : 0;
+
+    // Group by status
+    const byStatus = await repo.createQueryBuilder("d")
+        .select("d.status", "status")
+        .addSelect("COUNT(*)", "count")
+        .addSelect("SUM(d.totalTTCAfterRemise)", "totalTTC")
+        .where("d.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("d.status")
+        .getRawMany();
+
+    return {
+        devis,
+        total: total || 0,
+        totalTTC: parseFloat(totalTTC?.total) || 0,
+        conversionRate: {
+            totalDevis: devisCount,
+            totalConverted: convertedCount,
+            rate: parseFloat(rate.toFixed(2))
+        },
+        byStatus
+    };
+}
+
+/**
+ * Get ventes comptoire statistics between dates
+ */
+async function getVentesComptoireStats(startDate, endDate) {
+    const repo = AppDataSource.getRepository(VenteComptoire);
+
+    const [ventes, total, totalTTC, totalHT, totalTVA, totalPayments, totalArticles] = await Promise.all([
+        repo.find({
+            where: {
+                dateCommande: Between(startDate, endDate)
+            },
+            relations: ["client", "vendeur", "articles", "articles.article"],
+            order: { dateCommande: "DESC" }
+        }),
+        repo.count({
+            where: { dateCommande: Between(startDate, endDate) }
+        }),
+        repo.createQueryBuilder("vc")
+            .select("SUM(vc.totalAfterRemise)", "total")
+            .where("vc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("vc")
+            .select("SUM(vc.subTotal)", "total")
+            .where("vc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("vc")
+            .select("SUM(vc.totalTax)", "total")
+            .where("vc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("vc")
+            .select("SUM(vc.totalPaymentAmount)", "total")
+            .where("vc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne(),
+        repo.createQueryBuilder("vc")
+            .leftJoin("vc.articles", "articles")
+            .select("SUM(articles.quantite)", "total")
+            .where("vc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+            .getRawOne()
+    ]);
+
+    return {
+        ventes,
+        total: total || 0,
+        totalTTC: parseFloat(totalTTC?.total) || 0,
+        totalHT: parseFloat(totalHT?.total) || 0,
+        totalTVA: parseFloat(totalTVA?.total) || 0,
+        totalPayments: parseFloat(totalPayments?.total) || 0,
+        totalArticles: parseInt(totalArticles?.total) || 0
+    };
+}
+
+/**
+ * Get top selling products between dates
+ */
+async function getTopProducts(startDate, endDate, limit = 10) {
+    // Get products from commandes
+    const commandeProducts = await AppDataSource.createQueryBuilder()
+        .select("article.id", "id")
+        .addSelect("article.reference", "reference")
+        .addSelect("article.designation", "designation")
+        .addSelect("article.nom", "nom")
+        .addSelect("SUM(articles.quantite)", "totalQuantity")
+        .addSelect("SUM(articles.quantite * articles.prixUnitaire)", "totalHT")
+        .from(BonCommandeClientArticle, "articles")
+        .leftJoin("articles.article", "article")
+        .leftJoin("articles.bonCommandeClient", "bc")
+        .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("article.id")
+        .addGroupBy("article.reference")
+        .addGroupBy("article.designation")
+        .addGroupBy("article.nom")
+        .orderBy("totalQuantity", "DESC")
+        .limit(limit)
+        .getRawMany();
+
+    // Get products from ventes comptoire
+    const venteProducts = await AppDataSource.createQueryBuilder()
+        .select("article.id", "id")
+        .addSelect("article.reference", "reference")
+        .addSelect("article.designation", "designation")
+        .addSelect("article.nom", "nom")
+        .addSelect("SUM(articles.quantite)", "totalQuantity")
+        .addSelect("SUM(articles.quantite * articles.prixUnitaire)", "totalHT")
+        .from(VenteComptoireArticle, "articles")
+        .leftJoin("articles.article", "article")
+        .leftJoin("articles.venteComptoire", "vc")
+        .where("vc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("article.id")
+        .addGroupBy("article.reference")
+        .addGroupBy("article.designation")
+        .addGroupBy("article.nom")
+        .orderBy("totalQuantity", "DESC")
+        .limit(limit)
+        .getRawMany();
+
+    // Combine and aggregate results
+    const productMap = new Map();
+
+    [...commandeProducts, ...venteProducts].forEach(product => {
+        if (productMap.has(product.id)) {
+            const existing = productMap.get(product.id);
+            existing.totalQuantity += parseInt(product.totalQuantity) || 0;
+            existing.totalHT += parseFloat(product.totalHT) || 0;
+        } else {
+            productMap.set(product.id, {
+                id: product.id,
+                reference: product.reference,
+                designation: product.designation,
+                nom: product.nom,
+                totalQuantity: parseInt(product.totalQuantity) || 0,
+                totalHT: parseFloat(product.totalHT) || 0
+            });
+        }
+    });
+
+    // Convert to array and sort
+    const topProducts = Array.from(productMap.values())
+        .sort((a, b) => b.totalQuantity - a.totalQuantity)
+        .slice(0, limit);
+
+    return topProducts;
+}
+
+/**
+ * Get top clients by purchase amount between dates
+ */
+async function getTopClients(startDate, endDate, limit = 10) {
+    // Get clients from commandes
+    const commandeClients = await AppDataSource.createQueryBuilder()
+        .select("client.id", "id")
+        .addSelect("client.raison_sociale", "raison_sociale")
+        .addSelect("client.designation", "designation")
+        .addSelect("client.matricule_fiscal", "matricule_fiscal")
+        .addSelect("SUM(bc.totalTTCAfterRemise)", "totalTTC")
+        .addSelect("COUNT(bc.id)", "orderCount")
+        .from(BonCommandeClient, "bc")
+        .leftJoin("bc.client", "client")
+        .where("bc.dateCommande BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("client.id")
+        .addGroupBy("client.raison_sociale")
+        .addGroupBy("client.designation")
+        .addGroupBy("client.matricule_fiscal")
+        .orderBy("totalTTC", "DESC")
+        .limit(limit)
+        .getRawMany();
+
+    // Get clients from factures
+    const factureClients = await AppDataSource.createQueryBuilder()
+        .select("client.id", "id")
+        .addSelect("client.raison_sociale", "raison_sociale")
+        .addSelect("client.designation", "designation")
+        .addSelect("client.matricule_fiscal", "matricule_fiscal")
+        .addSelect("SUM(f.totalTTCAfterRemise)", "totalTTC")
+        .addSelect("COUNT(f.id)", "orderCount")
+        .from(FactureClient, "f")
+        .leftJoin("f.client", "client")
+        .where("f.dateFacture BETWEEN :start AND :end", { start: startDate, end: endDate })
+        .groupBy("client.id")
+        .addGroupBy("client.raison_sociale")
+        .addGroupBy("client.designation")
+        .addGroupBy("client.matricule_fiscal")
+        .orderBy("totalTTC", "DESC")
+        .limit(limit)
+        .getRawMany();
+
+    // Combine and aggregate results
+    const clientMap = new Map();
+
+    [...commandeClients, ...factureClients].forEach(client => {
+        if (clientMap.has(client.id)) {
+            const existing = clientMap.get(client.id);
+            existing.totalTTC += parseFloat(client.totalTTC) || 0;
+            existing.orderCount += parseInt(client.orderCount) || 0;
+        } else if (client.id) {
+            clientMap.set(client.id, {
+                id: client.id,
+                raison_sociale: client.raison_sociale,
+                designation: client.designation,
+                matricule_fiscal: client.matricule_fiscal,
+                totalTTC: parseFloat(client.totalTTC) || 0,
+                orderCount: parseInt(client.orderCount) || 0
+            });
+        }
+    });
+
+    // Convert to array and sort
+    const topClients = Array.from(clientMap.values())
+        .sort((a, b) => b.totalTTC - a.totalTTC)
+        .slice(0, limit);
+
+    return topClients;
+}
+
+/**
+ * Get monthly trends for charts
+ */
+async function getMonthlyTrends(startDate, endDate) {
+    const monthlyData = [];
+
+    // Generate months between start and end dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const currentDate = new Date(start);
+
+    while (currentDate <= end) {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
+        const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+
+        const monthStart = new Date(year, month - 1, 1);
+        const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+
+        // Get data for this month
+        const [facturesTotal, ventesTotal, commandesCount] = await Promise.all([
+            AppDataSource.createQueryBuilder()
+                .select("SUM(totalTTCAfterRemise)", "total")
+                .from(FactureClient, "f")
+                .where("dateFacture BETWEEN :start AND :end", { start: monthStart, end: monthEnd })
+                .getRawOne(),
+            AppDataSource.createQueryBuilder()
+                .select("SUM(totalAfterRemise)", "total")
+                .from(VenteComptoire, "vc")
+                .where("dateCommande BETWEEN :start AND :end", { start: monthStart, end: monthEnd })
+                .getRawOne(),
+            AppDataSource.createQueryBuilder()
+                .select("COUNT(*)", "count")
+                .from(BonCommandeClient, "bc")
+                .where("dateCommande BETWEEN :start AND :end", { start: monthStart, end: monthEnd })
+                .getRawOne()
+        ]);
+
+        monthlyData.push({
+            month: monthStr,
+            monthName: currentDate.toLocaleString('fr-FR', { month: 'long' }),
+            year,
+            factures: parseFloat(facturesTotal?.total) || 0,
+            ventesComptoire: parseFloat(ventesTotal?.total) || 0,
+            totalChiffreAffaires: (parseFloat(facturesTotal?.total) || 0) + (parseFloat(ventesTotal?.total) || 0),
+            commandesCount: parseInt(commandesCount?.count) || 0
+        });
+
+        // Move to next month
+        currentDate.setMonth(currentDate.getMonth() + 1);
+    }
+
+    return monthlyData;
+}
+
