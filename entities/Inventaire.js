@@ -8,9 +8,9 @@ const InventaireItem = new EntitySchema({
     id: { type: "int", primary: true, generated: true },
     inventaire_id: { type: "int", nullable: true },
     article_id: { type: "int", nullable: true },
-    qte_avant: { type: "decimal", precision: 10, scale: 2, nullable: true },
-    qte_reel: { type: "decimal", precision: 10, scale: 2, nullable: true },
-    qte_ajustement: { type: "decimal", precision: 10, scale: 2, nullable: true },
+    qte_avant: { type: "int", nullable: true, default: 0 },
+    qte_reel: { type: "int", nullable: true, default: 0 },
+    qte_ajustement: { type: "int", nullable: true, default: 0 },
 
 
 

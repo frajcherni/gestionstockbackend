@@ -6,6 +6,9 @@ const { StockDepot } = require("../entities/StockDepot");
 const { AppDataSource } = require("../db");
 const { In } = require('typeorm');
 
+// Helper: safely convert any value to integer (returns 0 for NaN/null/undefined)
+const toInt = (v) => { const n = Math.round(parseFloat(v)); return isNaN(n) ? 0 : n; };
+
 // Get all inventaires
 exports.getAllInventaires = async (req, res) => {
     try {
@@ -29,9 +32,6 @@ exports.getAllInventaires = async (req, res) => {
         });
     }
 };
-// Create new inventaire (ERP Standard)
-// Add at the top with other imports
-
 exports.createInventaire = async (req, res) => {
     const queryRunner = AppDataSource.createQueryRunner();
 
@@ -49,9 +49,11 @@ exports.createInventaire = async (req, res) => {
         await queryRunner.connect();
         await queryRunner.startTransaction();
 
-        const inventaireRepo = queryRunner.manager.getRepository(Inventaire);
+        const inventaireRepo    = queryRunner.manager.getRepository(Inventaire);
         const inventaireItemRepo = queryRunner.manager.getRepository(InventaireItem);
-        const articleRepo = queryRunner.manager.getRepository(Article);
+        const articleRepo       = queryRunner.manager.getRepository(Article);
+        const depotRepo         = queryRunner.manager.getRepository(Depot);
+        const stockRepo         = queryRunner.manager.getRepository(StockDepot);
 
         // Check if numero exists
         const existingInventaire = await inventaireRepo.findOne({ where: { numero } });
@@ -62,78 +64,120 @@ exports.createInventaire = async (req, res) => {
             });
         }
 
-        // 1. Create inventaire with "Terminé" status
+        // ── Resolve depot entity ──────────────────────────────────────────────
+        const depotEntity = await depotRepo.findOne({ where: { nom: depot } });
+        if (!depotEntity) {
+            return res.status(400).json({
+                success: false,
+                message: `Dépôt "${depot}" introuvable`
+            });
+        }
+
+        // ── Create inventaire header ──────────────────────────────────────────
         const newInventaire = inventaireRepo.create({
             numero,
             date,
             date_inventaire,
             depot,
             description: description || "",
-            status: "Terminé", // Always "Terminé"
+            status: "Terminé",
             article_count: articles.length,
-            total_ht: 0,
+            total_ht:  0,
             total_ttc: 0,
             total_tva: 0
         });
-
         await inventaireRepo.save(newInventaire);
 
-        // 2. Create inventaire items
-        const createdItems = [];
-        let totalHT = 0;
+        // ── Create items + accumulate totals & per-article qte ────────────────
+        let totalHT  = 0;
         let totalTVA = 0;
         let totalTTC = 0;
 
-        for (const item of articles) {
-            const { article_id, qte_reel, ligne_numero } = item;
+        // Map: article_id → total qte_reel (multiple lines of same article sum up)
+        const articleQteMap = new Map();
 
-            // Get article for prices
+        for (const item of articles) {
+            const { article_id, ligne_numero } = item;
+            const qte_reel = toInt(item.qte_reel); // force integer
+
             const article = await articleRepo.findOne({ where: { id: article_id } });
             if (!article) {
-                console.warn(`Article ${article_id} non trouvé`);
+                console.warn(`Article ${article_id} non trouvé, ignoré`);
                 continue;
             }
 
-            // Calculate prices
-            const pua_ht = parseFloat(article.pua_ht) || 0;
-            const tva_rate = parseFloat(article.tva) || 19;
-            const total_ht = pua_ht * qte_reel;
+            // ── Read current stock before inventory (qte_avant) ───────────────
+            const existingStock = await stockRepo.findOne({
+                where: { article_id, depot_id: depotEntity.id }
+            });
+            const qte_avant     = existingStock ? toInt(existingStock.qte) : 0;
+            const qte_ajustement = qte_reel - qte_avant;
+
+            const pua_ht    = parseFloat(article.pua_ht) || 0;
+            const tva_rate  = parseFloat(article.tva)    || 19;
+            const total_ht  = pua_ht * qte_reel;
             const total_tva = total_ht * (tva_rate / 100);
             const total_ttc = total_ht + total_tva;
 
-            // Add to totals
-            totalHT += total_ht;
+            totalHT  += total_ht;
             totalTVA += total_tva;
             totalTTC += total_ttc;
 
-            // Create item
-            const inventaireItem = inventaireItemRepo.create({
-                inventaire_id: newInventaire.id,
-                article_id: article_id,
-                ligne_numero: ligne_numero || 0,
-                qte_avant: 0, // Always 0 for simple version
-                qte_reel: qte_reel,
-                qte_ajustement: qte_reel, // Same as qte_reel
-                pua_ht: pua_ht,
-                pua_ttc: pua_ht * (1 + (tva_rate / 100)),
-                tva: tva_rate,
-                total_tva: total_tva,
-                total_ht: total_ht,
-                total_ttc: total_ttc
-            });
+            // Accumulate qte per article (same article may appear on several lines)
+            articleQteMap.set(article_id, (articleQteMap.get(article_id) || 0) + qte_reel);
 
-            createdItems.push(await inventaireItemRepo.save(inventaireItem));
+            await inventaireItemRepo.save(inventaireItemRepo.create({
+                inventaire_id:  newInventaire.id,
+                article_id,
+                ligne_numero:   ligne_numero || 0,
+                qte_avant,
+                qte_reel,
+                qte_ajustement,
+                pua_ht,
+                pua_ttc:  pua_ht * (1 + tva_rate / 100),
+                tva:      tva_rate,
+                total_tva,
+                total_ht,
+                total_ttc
+            }));
         }
 
-        // 3. Update inventaire totals
-        newInventaire.total_ht = totalHT;
+        // ── Update inventaire totals ───────────────────────────────────────────
+        newInventaire.total_ht  = totalHT;
         newInventaire.total_tva = totalTVA;
         newInventaire.total_ttc = totalTTC;
         await inventaireRepo.save(newInventaire);
 
+        // ── Upsert StockDepot + update Article.qte ────────────────────────────
+        for (const [articleId, totalQte] of articleQteMap) {
+            // Find or create the stock_depot row for this article + depot
+            let stockDepot = await stockRepo.findOne({
+                where: { article_id: articleId, depot_id: depotEntity.id }
+            });
+
+            if (stockDepot) {
+                // Set stock to the real counted quantity (replace, not add)
+                stockDepot.qte = Math.round(totalQte);
+            } else {
+                stockDepot = stockRepo.create({
+                    article_id: articleId,
+                    depot_id:   depotEntity.id,
+                    qte:        Math.round(totalQte)
+                });
+            }
+            await stockRepo.save(stockDepot);
+            console.log(`✅ StockDepot mis à jour: article ${articleId}, dépôt "${depot}" → ${Math.round(totalQte)}`);
+
+            // Recalculate global article.qte = sum across ALL depots
+            const allDepotStocks = await stockRepo.find({ where: { article_id: articleId } });
+            const globalQte = allDepotStocks.reduce((sum, s) => sum + (parseInt(s.qte) || 0), 0);
+            await articleRepo.update({ id: articleId }, { qte: globalQte });
+
+            console.log(`✅ Article.qte mis à jour: article ${articleId}, global → ${globalQte}`);
+        }
+
         await queryRunner.commitTransaction();
 
-        // Return created inventaire
         const completeInventaire = await inventaireRepo.findOne({
             where: { id: newInventaire.id },
             relations: ['items', 'items.article']
@@ -225,7 +269,7 @@ exports.updateInventaire = async (req, res) => {
 
         for (const item of existingInventaire.items || []) {
             const currentAdjustment = articleAdjustments.get(item.article_id) || 0;
-            articleAdjustments.set(item.article_id, currentAdjustment + (item.qte_ajustement || 0));
+            articleAdjustments.set(item.article_id, currentAdjustment + toInt(item.qte_ajustement));
             console.log(`Item existant: article ${item.article_id}, qte_reel: ${item.qte_reel}, ajustement: ${item.qte_ajustement}`);
         }
 
@@ -239,7 +283,7 @@ exports.updateInventaire = async (req, res) => {
             });
 
             if (stockDepot) {
-                stockDepot.qte = parseInt(stockDepot.qte || 0) - Math.round(totalAdjustment);
+                stockDepot.qte = toInt(stockDepot.qte) - totalAdjustment;
                 await stockRepo.save(stockDepot);
                 console.log(`✅ Stock annulé article ${articleId}: ajustement -${totalAdjustment}, nouveau stock: ${stockDepot.qte}`);
             }
@@ -270,7 +314,8 @@ exports.updateInventaire = async (req, res) => {
             const articleDetails = new Map();
 
             for (const newItem of articles) {
-                const { article_id, qte_reel, ligne_numero } = newItem;
+                const { article_id, ligne_numero } = newItem;
+                const qte_reel = toInt(newItem.qte_reel); // force integer
 
                 console.log(`Nouvel item: ligne ${ligne_numero}, article ${article_id}, qte: ${qte_reel}`);
 
@@ -283,7 +328,7 @@ exports.updateInventaire = async (req, res) => {
                 }
 
                 newArticleTotals.set(article_id, newArticleTotals.get(article_id) + qte_reel);
-                articleDetails.get(article_id).items.push(newItem);
+                articleDetails.get(article_id).items.push({ ...newItem, qte_reel }); // store coerced value
             }
 
             // Charger les informations des articles
@@ -315,21 +360,22 @@ exports.updateInventaire = async (req, res) => {
                     }
                 });
 
-                const qteAvant = stockDepot ? parseInt(stockDepot.qte || 0) : 0;
+                const qteAvant = stockDepot ? toInt(stockDepot.qte) : 0;
+                const newTotalQteInt = toInt(newTotalQte);
 
                 // Mettre à jour le stock avec la nouvelle quantité totale
                 if (!stockDepot) {
                     stockDepot = stockRepo.create({
                         article_id: articleId,
                         depot_id: depotEntity.id,
-                        qte: newTotalQte
+                        qte: newTotalQteInt
                     });
                 } else {
-                    stockDepot.qte = Math.round(newTotalQte);
+                    stockDepot.qte = newTotalQteInt;
                 }
 
                 await stockRepo.save(stockDepot);
-                console.log(`✅ Stock mis à jour article ${articleId}: ${qteAvant} -> ${newTotalQte}`);
+                console.log(`✅ Stock mis à jour article ${articleId}: ${qteAvant} -> ${newTotalQteInt}`);
 
                 // ================================================
                 // 🚨 ÉTAPE 4: TRAITER CHAQUE LIGNE (mise à jour ou création)
@@ -365,7 +411,7 @@ exports.updateInventaire = async (req, res) => {
 
                         // Recalculer qte_ajustement basé sur le nouveau qte_reel
                         // qte_avant reste le même (stock avant l'inventaire)
-                        const qteAvantForItem = existingItem.qte_avant || 0;
+                        const qteAvantForItem = toInt(existingItem.qte_avant);
                         const qteAjustementForItem = qte_reel - qteAvantForItem;
                         existingItem.qte_ajustement = qteAjustementForItem;
 
@@ -388,9 +434,9 @@ exports.updateInventaire = async (req, res) => {
                         let qteAjustementForItem;
 
                         if (i === 0) {
-                            // Première ligne: utilise le stock original
+                            // Première ligne: utilise le stock original (après annulation)
                             qteAvantForItem = qteAvant;
-                            qteAjustementForItem = qte_reel - qteAvantForItem;
+                            qteAjustementForItem = qte_reel - toInt(qteAvant);
                         } else {
                             // Lignes suivantes: considérées comme nouvelles
                             qteAvantForItem = 0;
@@ -434,7 +480,7 @@ exports.updateInventaire = async (req, res) => {
                 const allDepotStocks = await stockRepo.find({
                     where: { article_id: articleId }
                 });
-                const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + parseInt(stock.qte || 0), 0);
+                const totalArticleStock = allDepotStocks.reduce((sum, stock) => sum + toInt(stock.qte), 0);
 
                 await articleRepo.update(
                     { id: articleId },
@@ -559,7 +605,7 @@ exports.deleteInventaire = async (req, res) => {
         const articleAdjustments = new Map();
         for (const item of inventaire.items || []) {
             const currentAdjustment = articleAdjustments.get(item.article_id) || 0;
-            articleAdjustments.set(item.article_id, currentAdjustment + (item.qte_ajustement || 0));
+            articleAdjustments.set(item.article_id, currentAdjustment + toInt(item.qte_ajustement));
         }
 
         // Annuler les ajustements dans le stock
@@ -572,7 +618,7 @@ exports.deleteInventaire = async (req, res) => {
             });
 
             if (stockDepot) {
-                stockDepot.qte = parseInt(stockDepot.qte || 0) - Math.round(totalAdjustment);
+                stockDepot.qte = toInt(stockDepot.qte) - totalAdjustment;
 
                 // Vérifier le stock négatif
                 if (stockDepot.qte < 0) {
@@ -592,7 +638,7 @@ exports.deleteInventaire = async (req, res) => {
             }
 
             const allDepotStocks2 = await stockRepo.find({ where: { article_id: articleId } });
-            const totalArticleStock2 = allDepotStocks2.reduce((sum, stock) => sum + parseInt(stock.qte || 0), 0);
+            const totalArticleStock2 = allDepotStocks2.reduce((sum, stock) => sum + toInt(stock.qte), 0);
 
             await articleRepo.update(
                 { id: articleId },
