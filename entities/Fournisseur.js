@@ -15,6 +15,7 @@ const Fournisseur = new EntitySchema({
     telephone1: { type: "varchar", length: 20, nullable: true },
     telephone2: { type: "varchar", length: 20, nullable: true },
     email: { type: "varchar", length: 100, nullable: true },
+    code_barre_fournisseur: { type: "varchar", length: 100, nullable: true },
     status: {
       type: "enum",
       enum: ["Actif", "Inactif"],
