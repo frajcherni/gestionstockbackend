@@ -5,12 +5,284 @@ const { Vendeur } = require("../entities/Vendeur");
 const { BonLivraison } = require("../entities/BonLivraison");
 const { BonCommandeClient } = require("../entities/BonCommandeClient");
 const { VenteComptoire } = require("../entities/VenteComptoire");
+const { EncaissementClient } = require("../entities/EncaissementClient");
 
 const {
   FactureClient,
   FactureClientArticle,
 } = require("../entities/FactureClient");
 
+// ============================================================
+// HELPER: Calculate payment totals for a facture
+// ============================================================
+function calculatePaymentTotals(facture, encaissementsMap) {
+  const safeParseFloat = (val) => {
+    if (val === null || val === undefined || val === "") return 0;
+    const num = typeof val === "string" ? parseFloat(val) : Number(val);
+    return isNaN(num) ? 0 : num;
+  };
+
+  const sumPaymentMethods = (methods, excludeRetenue = true) => {
+    if (!methods || !Array.isArray(methods)) return 0;
+    return methods.reduce((sum, pm) => {
+      if (excludeRetenue && pm.method === "retenue") return sum;
+      return sum + safeParseFloat(pm.amount);
+    }, 0);
+  };
+
+  const sumPaiements = (paiements) => {
+    if (!paiements || !Array.isArray(paiements)) return 0;
+    return paiements.reduce((sum, p) => sum + safeParseFloat(p.montant), 0);
+  };
+
+  const sumRetention = (methods, finalTotal) => {
+    if (!methods || !Array.isArray(methods)) return 0;
+    return methods
+      .filter((pm) => pm.method === "retenue")
+      .reduce((sum, pm) => {
+        const rate = pm.tauxRetention || 1;
+        return sum + (finalTotal * rate) / 100;
+      }, 0);
+  };
+
+  // Get encaissements for this facture from the pre-built map
+  const relevantEncaissements = encaissementsMap.get(facture.id) || [];
+  const totalEncaissements = relevantEncaissements.reduce(
+    (sum, enc) => sum + safeParseFloat(enc.montant),
+    0
+  );
+
+  // Payment methods from all sources (excluding retention)
+  const facturePayments = sumPaymentMethods(facture.paymentMethods);
+  const bcPayments = sumPaymentMethods(facture.bonCommandeClient?.paymentMethods);
+  const bcPaiements = sumPaiements(facture.bonCommandeClient?.paiements);
+  const vcPayments = sumPaymentMethods(facture.venteComptoire?.paymentMethods);
+  const blPayments = sumPaymentMethods(facture.bonLivraison?.paymentMethods);
+  const blPaiements = sumPaiements(facture.bonLivraison?.paiements);
+
+  const totalPaymentMethods =
+    facturePayments + bcPayments + vcPayments + blPayments + blPaiements;
+
+  // Calculate article totals
+  let subTotal = 0, totalTax = 0, grandTotal = 0;
+  if (facture.articles && Array.isArray(facture.articles)) {
+    facture.articles.forEach((item) => {
+      const qty = Number(item.quantite) || 1;
+      const priceHT = Number(item.prixUnitaire) || 0;
+      const tvaRate = Number(item.tva ?? 0);
+      const remiseRate = Number(item.remise || 0);
+      const priceTTC = Number(item.prix_ttc) || priceHT * (1 + tvaRate / 100);
+
+      const montantHTLigne = Math.round(qty * priceHT * (1 - remiseRate / 100) * 1000) / 1000;
+      const montantTTCLigne = Math.round(qty * priceTTC * 1000) / 1000;
+      const taxAmount = Math.round((montantTTCLigne - montantHTLigne) * 1000) / 1000;
+
+      subTotal += montantHTLigne;
+      totalTax += taxAmount;
+      grandTotal += montantTTCLigne;
+    });
+  }
+
+  // Calculate final total
+  let finalTotal = grandTotal;
+  const hasDiscount = facture.remise && Number(facture.remise) > 0;
+  if (hasDiscount) {
+    if (facture.remiseType === "percentage") {
+      finalTotal = grandTotal * (1 - Number(facture.remise) / 100);
+    } else {
+      finalTotal = Number(facture.remise);
+    }
+  }
+  if (facture.timbreFiscal) {
+    if (hasDiscount) {
+      finalTotal += 1;
+    } else {
+      grandTotal += 1;
+      finalTotal = grandTotal;
+    }
+  }
+
+  subTotal = Math.round(subTotal * 1000) / 1000;
+  totalTax = Math.round(totalTax * 1000) / 1000;
+  grandTotal = Math.round(grandTotal * 1000) / 1000;
+  finalTotal = Math.round(finalTotal * 1000) / 1000;
+
+  // Retention from all sources
+  const factureRetention = facture.paymentMethods
+    ? sumRetention(facture.paymentMethods, finalTotal)
+    : safeParseFloat(facture.montantRetenue);
+  const bcRetention = facture.bonCommandeClient?.paymentMethods
+    ? sumRetention(facture.bonCommandeClient.paymentMethods, finalTotal)
+    : safeParseFloat(facture.bonCommandeClient?.montantRetenue);
+  const vcRetention = facture.venteComptoire?.paymentMethods
+    ? sumRetention(facture.venteComptoire.paymentMethods, finalTotal)
+    : 0;
+  const blRetention = facture.bonLivraison?.paymentMethods
+    ? sumRetention(facture.bonLivraison.paymentMethods, finalTotal)
+    : safeParseFloat(facture.bonLivraison?.montantRetenue);
+
+  const totalRetention = factureRetention + bcRetention + vcRetention + blRetention;
+
+  const totalPaye = totalEncaissements + totalPaymentMethods + bcPaiements;
+  let resteAPayer = Math.round((finalTotal - totalRetention - totalPaye) * 1000) / 1000;
+  resteAPayer = Math.max(0, resteAPayer);
+
+  // Determine status
+  let status = facture.status;
+  if (facture.status === "Annulee") {
+    status = "Annulee";
+  } else if (resteAPayer === 0 && finalTotal > 0) {
+    status = "Payee";
+  } else if (totalPaye > 0 && totalPaye < finalTotal - totalRetention) {
+    status = "Partiellement Payee";
+  }
+
+  return {
+    totalHT: subTotal,
+    totalTVA: totalTax,
+    totalTTC: grandTotal,
+    totalTTCAfterRemise: finalTotal,
+    montantPaye: totalPaye,
+    resteAPayer,
+    montantRetenue: totalRetention,
+    status,
+    hasPayments: totalPaye > 0,
+  };
+}
+
+// ============================================================
+// PAGINATED ENDPOINT - Optimized for the list view
+// ============================================================
+exports.getAllFacturesClientPaginated = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+    const search = (req.query.search || "").trim();
+    const searchPhone = (req.query.searchPhone || "").trim();
+    const statusFilter = (req.query.status || "").trim();
+    const startDate = req.query.startDate || null;
+    const endDate = req.query.endDate || null;
+
+    const repo = AppDataSource.getRepository(FactureClient);
+    const encRepo = AppDataSource.getRepository(EncaissementClient);
+
+    // Build query with filters
+    const qb = repo
+      .createQueryBuilder("facture")
+      .leftJoinAndSelect("facture.client", "client")
+      .leftJoinAndSelect("facture.vendeur", "vendeur")
+      .leftJoinAndSelect("facture.bonLivraison", "bonLivraison")
+      .leftJoinAndSelect("bonLivraison.paiements", "blPaiements")
+      .leftJoinAndSelect("facture.bonCommandeClient", "bonCommandeClient")
+      .leftJoinAndSelect("facture.venteComptoire", "venteComptoire")
+      .leftJoinAndSelect("bonCommandeClient.paiements", "bcPaiements")
+      .leftJoinAndSelect("facture.articles", "articles")
+      .leftJoinAndSelect("articles.article", "article");
+
+    // Apply search filters
+    if (search) {
+      qb.andWhere(
+        "(facture.numeroFacture LIKE :search OR client.raison_sociale LIKE :search OR client.designation LIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+
+    if (searchPhone) {
+      const cleanPhone = searchPhone.replace(/\s/g, "");
+      qb.andWhere(
+        "(REPLACE(client.telephone1, ' ', '') LIKE :phone OR REPLACE(client.telephone2, ' ', '') LIKE :phone)",
+        { phone: `%${cleanPhone}%` }
+      );
+    }
+
+    if (startDate) {
+      qb.andWhere("facture.dateFacture >= :startDate", { startDate });
+    }
+    if (endDate) {
+      qb.andWhere("facture.dateFacture <= :endDate", { endDate: endDate + "T23:59:59" });
+    }
+
+    // Get total count BEFORE pagination (for the UI)
+    const totalCount = await qb.getCount();
+
+    // Apply ordering and pagination
+    qb.orderBy("facture.dateFacture", "DESC")
+      .addOrderBy("facture.numeroFacture", "DESC")
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const factures = await qb.getMany();
+
+    // Get ALL encaissements for the fetched facture IDs only (not all encaissements)
+    const factureIds = factures.map((f) => f.id);
+    let encaissementsMap = new Map();
+
+    if (factureIds.length > 0) {
+      const encaissements = await encRepo
+        .createQueryBuilder("enc")
+        .where("enc.facture_id IN (:...ids)", { ids: factureIds })
+        .getMany();
+
+      // Build Map: factureId -> [encaissements]
+      encaissements.forEach((enc) => {
+        const fId = enc.facture_id;
+        if (!encaissementsMap.has(fId)) {
+          encaissementsMap.set(fId, []);
+        }
+        encaissementsMap.get(fId).push(enc);
+      });
+    }
+
+    // Calculate totals server-side
+    const enrichedFactures = factures.map((facture) => {
+      const calculated = calculatePaymentTotals(facture, encaissementsMap);
+
+      // Combine payment methods for display
+      const allPaymentMethods = [
+        ...(facture.paymentMethods || []),
+        ...(facture.bonCommandeClient?.paymentMethods || []),
+        ...(facture.venteComptoire?.paymentMethods || []),
+        ...(facture.bonLivraison?.paymentMethods || []),
+      ];
+      const allPaiements = [
+        ...(facture.bonCommandeClient?.paiements || []),
+        ...(facture.bonLivraison?.paiements || []),
+      ];
+
+      return {
+        ...facture,
+        ...calculated,
+        allPaymentMethods,
+        allPaiements,
+        paymentMethods: allPaymentMethods,
+        bonCommandePaiements: allPaiements,
+      };
+    });
+
+    // Apply status filter AFTER calculation (since status is computed)
+    let finalResults = enrichedFactures;
+    if (statusFilter) {
+      finalResults = enrichedFactures.filter((f) => f.status === statusFilter);
+    }
+
+    res.json({
+      factures: finalResults,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+      },
+    });
+  } catch (err) {
+    console.error("Error in paginated factures:", err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
+};
+
+// ============================================================
+// ORIGINAL ENDPOINT - Kept for journal export / backward compat
+// ============================================================
 exports.getAllFacturesClient = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(FactureClient);

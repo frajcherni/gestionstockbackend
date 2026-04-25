@@ -24,6 +24,7 @@ const paiementClientRoutes = require("./routes/paiementClientRoutes");
 const inventaireRoutes = require("./routes/inventaireRoutes");
 const depotRoutes = require("./routes/depotRoutes");
 const TransfertRoutes = require("./routes/TransfertRoutes");
+const CarouselRoutes = require("./routes/CarouselRoutes");
 
 
 
@@ -36,7 +37,7 @@ app.use("/uploads", express.static("uploads"));
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://54.37.159.225"], // 👈 Add your frontend URLs
+    origin: ["http://localhost:3000", "http://localhost:5173", "http://54.37.159.225"], // 👈 Add your frontend URLs
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
@@ -73,6 +74,7 @@ app.use("/api/inventaire", inventaireRoutes);
 app.use("/api/Transfert", TransfertRoutes);
 
 app.use("/api/depots", depotRoutes);
+app.use("/api/carousel", CarouselRoutes);
 
 
 app.get("/health", (req, res) => {

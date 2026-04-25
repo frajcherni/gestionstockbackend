@@ -43,15 +43,9 @@ const upload = multer({
 // Use this for single file upload with text fields
 const uploadMiddleware = upload.single('image');
 
-// In your categorie controller
 exports.getAll = async (req, res) => {
   try {
     const list = await repo.find();
-
-    list.forEach(cat => {
-      if (cat.parent_id) {
-      }
-    });
     
     // Add parentName for frontend display
     const categoriesWithParentNames = list.map(cat => {
@@ -68,38 +62,6 @@ exports.getAll = async (req, res) => {
         image: cat.image ? `${req.protocol}://${req.get('host')}/${cat.image.replace(/\\/g, "/")}` : null
       };
     });
-    
-  
-    
-    res.json(categoriesWithParentNames);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-
-
-// In your categorie controller
-exports.getAll = async (req, res) => {
-  try {
-    const list = await repo.find();
-
- 
-    
-    // Add parentName for frontend display
-    const categoriesWithParentNames = list.map(cat => {
-      let parentName = null;
-      if (cat.parent_id) {
-        const parent = list.find(p => p.id === cat.parent_id);
-        parentName = parent ? parent.nom : 'Unknown';
-      }
-      
-      return {
-        ...cat,
-        parentName: parentName
-      };
-    });
-    
     
     res.json(categoriesWithParentNames);
   } catch (error) {
@@ -131,7 +93,9 @@ exports.create = async (req, res) => {
         nom: req.body.nom,
         description: req.body.description || '',
         parent_id: req.body.parent_id || null, // Convert empty string to null
-        image: req.file ? req.file.path : null // Add image path if file uploaded
+        image: req.file ? req.file.path : null, // Add image path if file uploaded
+        on_website: req.body.on_website === 'true' || req.body.on_website === true,
+        website_order: parseInt(req.body.website_order) || 0
       };
       
 
@@ -180,7 +144,9 @@ exports.update = async (req, res) => {
       const data = {
         nom: req.body.nom,
         description: req.body.description,
-        parent_id: req.body.parent_id || null, // Convert empty string to null
+        parent_id: req.body.parent_id !== undefined ? (req.body.parent_id || null) : item.parent_id,
+        on_website: req.body.on_website !== undefined ? (req.body.on_website === 'true' || req.body.on_website === true) : item.on_website,
+        website_order: req.body.website_order !== undefined ? (parseInt(req.body.website_order) || 0) : item.website_order
       };
 
       // Update image if new file is uploaded
@@ -222,7 +188,11 @@ exports.remove = async (req, res) => {
 
     // Delete associated image file if exists
     if (item.image && fs.existsSync(item.image)) {
-      fs.unlinkSync(item.image);
+      try {
+        fs.unlinkSync(item.image);
+      } catch (err) {
+        console.error("Failed to delete image file:", err);
+      }
     }
 
     const result = await repo.delete(id);
@@ -234,12 +204,4 @@ exports.remove = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
-};
-
-exports.remove = async (req, res) => {
-  const id = parseInt(req.params.id);
-  const result = await repo.delete(id);
-  if (result.affected === 0)
-    return res.status(404).json({ message: 'Not found' });
-  res.status(204).send();
 };

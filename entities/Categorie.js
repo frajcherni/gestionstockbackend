@@ -12,7 +12,8 @@ const Categorie = new EntitySchema({
     createdAt: { type: "timestamp", createDate: true },
     updatedAt: { type: "timestamp", updateDate: true },
     image: { type: "varchar", nullable: true }, // ADD THIS LINE
-
+    on_website: { type: "boolean", default: false, nullable: true },
+    website_order: { type: "int", default: 0, nullable: true },
   }
 });
 

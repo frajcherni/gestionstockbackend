@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/FactureClientController");
 
+router.get("/paginated", controller.getAllFacturesClientPaginated);
 router.get("/getAllFacturesClient", controller.getAllFacturesClient);
 router.post("/addAllFacturesClient", controller.createFactureClient);
 router.put("/updateFactureClient/:id", controller.updateFactureClient);

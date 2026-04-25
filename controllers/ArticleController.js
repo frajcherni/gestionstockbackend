@@ -153,8 +153,14 @@ exports.createArticle = async (req, res) => {
 
       if (savedArticle.image) {
         savedArticle.image = `${req.protocol}://${req.get("host")}/${
-          savedArticle.image
+          savedArticle.image.replace(/\\/g, "/")
         }`;
+      }
+
+      if (savedArticle.website_images) {
+        savedArticle.website_images = savedArticle.website_images.map(img => 
+           `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+        );
       }
 
       res.status(201).json(savedArticle);
@@ -180,8 +186,11 @@ exports.getAllArticles = async (req, res) => {
     const articlesWithImageUrl = articles.map((article) => ({
       ...article,
       image: article.image
-        ? `${req.protocol}://${req.get("host")}/${article.image}`
+        ? `${req.protocol}://${req.get("host")}/${article.image.replace(/\\/g, "/")}`
         : null,
+      website_images: (article.website_images || []).map(img => 
+        `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+      )
     }));
 
     res.json(articlesWithImageUrl);
@@ -203,7 +212,13 @@ exports.getArticleById = async (req, res) => {
 
     // Add full URL for image
     if (article.image) {
-      article.image = `${req.protocol}://${req.get("host")}/${article.image}`;
+      article.image = `${req.protocol}://${req.get("host")}/${article.image.replace(/\\/g, "/")}`;
+    }
+
+    if (article.website_images) {
+      article.website_images = article.website_images.map(img => 
+        `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+      );
     }
 
     res.json(article);
@@ -332,7 +347,7 @@ exports.updateArticle = async (req, res) => {
       const result = await articleRepository.save(article);
 
       if (result.image) {
-        result.image = `${req.protocol}://${req.get("host")}/${result.image}`;
+        result.image = `${req.protocol}://${req.get("host")}/${result.image.replace(/\\/g, "/")}`;
       }
 
       res.json(result);
@@ -613,7 +628,7 @@ exports.searchArticles = async (req, res) => {
     // --- Add full image URL ---
     const articlesWithUrls = articles.map(a => ({
       ...a,
-      image: a.image ? `${req.protocol}://${req.get("host")}/${a.image}` : null
+      image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null
     }));
 
     res.json({
