@@ -10,6 +10,8 @@ const {
 const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
 const { Vendeur } = require("../entities/Vendeur");
+const { Depot } = require("../entities/Depot");
+const { updateDepotStock } = require("../utils/stockUtils");
 
 exports.createBonLivraison = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -25,6 +27,7 @@ exports.createBonLivraison = async (req, res) => {
       notes,
       client_id,
       vendeur_id,
+      depot_id,
       bonCommandeClient_id,
       articles,
       taxMode,
@@ -46,6 +49,7 @@ exports.createBonLivraison = async (req, res) => {
     const bonCmdArticleRepo = queryRunner.manager.getRepository(
       BonCommandeClientArticle
     );
+    const depotRepo = queryRunner.manager.getRepository(Depot);
 
     const deliveryData = {
       voiture: (livraisonInfo && livraisonInfo.voiture) || null,
@@ -56,12 +60,17 @@ exports.createBonLivraison = async (req, res) => {
 
     let client = null;
     let vendeur = null;
+    let depot = null;
     let finalArticles = [];
     let bonCommandeClient = null;
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
       await queryRunner.rollbackTransaction();
       return res.status(400).json({ message: "Articles requis" });
+    }
+
+    if (depot_id) {
+      depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
     }
 
     if (bonCommandeClient_id) {
@@ -134,10 +143,15 @@ exports.createBonLivraison = async (req, res) => {
           continue;
         }
 
-        // ✅ Reduce stock for this BL delivery
-        article.qte -= quantiteSouhaiteePourCeBL;
-        article.qte_physique -= quantiteSouhaiteePourCeBL;
-        await articleRepo.save(article);
+        // ✅ Reduce stock for this BL delivery (DEPOT AWARE)
+        if (depot) {
+          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteSouhaiteePourCeBL);
+        } else {
+          // Fallback to global if no depot selected (though UI should prevent this)
+          article.qte -= quantiteSouhaiteePourCeBL;
+          //article.qte_physique -= quantiteSouhaiteePourCeBL;
+          await articleRepo.save(article);
+        }
 
         // ✅ UPDATE BC article's quantiteLivree to the NEW total delivered quantity
         bonCmdArticle.quantiteLivree = nouvelleQuantiteLivree;
@@ -244,10 +258,14 @@ exports.createBonLivraison = async (req, res) => {
           prix_unitaire = prix_ttc / (1 + tvaRate / 100);
         }
 
-        // Reduce stock
-        article.qte -= quantitePourStock;
-        article.qte_physique -= quantitePourStock;
-        await articleRepo.save(article);
+        // Reduce stock (DEPOT AWARE)
+        if (depot) {
+          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantitePourStock);
+        } else {
+          article.qte -= quantitePourStock;
+          //article.qte_physique -= quantitePourStock;
+          await articleRepo.save(article);
+        }
 
         finalArticles.push({
           article,
@@ -305,6 +323,7 @@ exports.createBonLivraison = async (req, res) => {
       notes: notes || null,
       client,
       vendeur,
+      depot,
       taxMode,
       bonCommandeClient: bonCommandeClient_id ? bonCommandeClient : null,
       ...deliveryData,
@@ -357,6 +376,7 @@ exports.updateBonLivraison = async (req, res) => {
     const bonCmdArticleRepo = queryRunner.manager.getRepository(
       BonCommandeClientArticle
     );
+    const depotRepo = queryRunner.manager.getRepository(Depot);
 
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
@@ -365,6 +385,7 @@ exports.updateBonLivraison = async (req, res) => {
         "articles.article",
         "client",
         "vendeur",
+        "depot",
         "bonCommandeClient",
         "bonCommandeClient.articles",
         "bonCommandeClient.articles.article",
@@ -378,18 +399,19 @@ exports.updateBonLivraison = async (req, res) => {
 
     // ✅ Extract all fields from req.body including delivery info
     const {
+      status,
       dateLivraison,
       remise,
       remiseType,
       notes,
       taxMode,
       articles,
-      // ✅ Add delivery info extraction
+      depot_id,
       voiture,
       serie,
       chauffeur,
       cin,
-      livraisonInfo, // Handle both direct fields and nested object
+      livraisonInfo,
       totalHT,
       totalTVA,
       totalTTC,
@@ -398,50 +420,84 @@ exports.updateBonLivraison = async (req, res) => {
       espaceNotes,
     } = req.body;
 
+    const oldStatus = bon.status || "Livré";
+    const oldWasDelivered = oldStatus === "Livré" || oldStatus === "Partiellement Livré";
+
+    // --- Step 1: Restore stock and BC delivered quantities ---
+    if (bon.bonCommandeClient) {
+      for (const oldItem of bon.articles) {
+        const bonCmdArticle = bon.bonCommandeClient.articles.find(
+          (a) => a.article.id === oldItem.article.id
+        );
+
+        if (bonCmdArticle) {
+          bonCmdArticle.quantiteLivree -= oldItem.quantite;
+          if (bonCmdArticle.quantiteLivree < 0) bonCmdArticle.quantiteLivree = 0;
+          await bonCmdArticleRepo.save(bonCmdArticle);
+        }
+
+        // Restore stock ONLY if it was previously delivered
+        if (oldWasDelivered) {
+          const restoreQty = parseInt(oldItem.quantite) || 0;
+          if (restoreQty > 0) {
+            if (bon.depot) {
+              await updateDepotStock(queryRunner.manager, oldItem.article.id, bon.depot.id, restoreQty);
+            } else {
+              const articleEntity = await articleRepo.findOneBy({ id: oldItem.article.id });
+              if (articleEntity) {
+                articleEntity.qte = (articleEntity.qte || 0) + restoreQty;
+                articleEntity.qte_physique = (articleEntity.qte_physique || 0) + restoreQty;
+                await articleRepo.save(articleEntity);
+              }
+            }
+          }
+        }
+      }
+    } else {
+      for (const oldItem of bon.articles) {
+        // Restore stock ONLY if it was previously delivered
+        if (oldWasDelivered) {
+          const restoreQty = parseInt(oldItem.quantite) || 0;
+          if (restoreQty > 0) {
+            if (bon.depot) {
+              await updateDepotStock(queryRunner.manager, oldItem.article.id, bon.depot.id, restoreQty);
+            } else {
+              const articleEntity = await articleRepo.findOneBy({ id: oldItem.article.id });
+              if (articleEntity) {
+                articleEntity.qte = (articleEntity.qte || 0) + restoreQty;
+                articleEntity.qte_physique = (articleEntity.qte_physique || 0) + restoreQty;
+                await articleRepo.save(articleEntity);
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Update basic information
-    bon.dateLivraison = dateLivraison
-      ? new Date(dateLivraison)
-      : bon.dateLivraison;
+    if (status !== undefined) bon.status = status;
+    bon.dateLivraison = dateLivraison ? new Date(dateLivraison) : bon.dateLivraison;
     bon.remise = remise !== undefined ? remise : bon.remise;
     bon.remiseType = remiseType || bon.remiseType;
     bon.notes = notes || bon.notes;
     bon.taxMode = taxMode || bon.taxMode;
-    bon.status = "Livré";
 
-    // ✅ Update delivery information
-    bon.voiture =
-      voiture !== undefined
-        ? voiture
-        : livraisonInfo && livraisonInfo.voiture !== undefined
-          ? livraisonInfo.voiture
-          : bon.voiture;
+    if (depot_id) {
+      const newDepot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
+      if (newDepot) bon.depot = newDepot;
+    }
 
-    bon.serie =
-      serie !== undefined
-        ? serie
-        : livraisonInfo && livraisonInfo.serie !== undefined
-          ? livraisonInfo.serie
-          : bon.serie;
+    // Update delivery information
+    bon.voiture = voiture !== undefined ? voiture : (livraisonInfo?.voiture ?? bon.voiture);
+    bon.serie = serie !== undefined ? serie : (livraisonInfo?.serie ?? bon.serie);
+    bon.chauffeur = chauffeur !== undefined ? chauffeur : (livraisonInfo?.chauffeur ?? bon.chauffeur);
+    bon.cin = cin !== undefined ? cin : (livraisonInfo?.cin ?? bon.cin);
 
-    bon.chauffeur =
-      chauffeur !== undefined
-        ? chauffeur
-        : livraisonInfo && livraisonInfo.chauffeur !== undefined
-          ? livraisonInfo.chauffeur
-          : bon.chauffeur;
-
-    bon.cin =
-      cin !== undefined
-        ? cin
-        : livraisonInfo && livraisonInfo.cin !== undefined
-          ? livraisonInfo.cin
-          : bon.cin;
-
+    const currentTotalTTC = totalTTCAfterRemise || totalTTC || bon.totalTTCAfterRemise || bon.totalTTC || 0;
     const hasPayments = paymentMethods && paymentMethods.length > 0;
     const hasRetenue = hasPayments && paymentMethods.some(pm => pm.method === "retenue");
 
     let montantRetenue = 0;
-    const currentTotalTTC = totalTTCAfterRemise || totalTTC || bon.totalTTCAfterRemise || bon.totalTTC || 0;
     if (hasRetenue) {
       const retenueMethod = paymentMethods.find(pm => pm.method === "retenue");
       const tauxRetention = retenueMethod.tauxRetention || 1;
@@ -457,7 +513,6 @@ exports.updateBonLivraison = async (req, res) => {
     const totalNet = parseFloat(currentTotalTTC);
     const resteAPayer = totalNet - montantRetenue - actualPaymentAmount;
 
-    // Update totals and payments
     if (totalHT !== undefined) bon.totalHT = parseFloat(totalHT);
     if (totalTVA !== undefined) bon.totalTVA = parseFloat(totalTVA);
     if (totalTTC !== undefined) bon.totalTTC = parseFloat(totalTTC);
@@ -472,163 +527,104 @@ exports.updateBonLivraison = async (req, res) => {
     bon.montantRetenue = montantRetenue;
     if (espaceNotes !== undefined) bon.espaceNotes = espaceNotes;
 
-    console.log("Updated delivery info:", {
-      voiture: bon.voiture,
-      serie: bon.serie,
-      chauffeur: bon.chauffeur,
-      cin: bon.cin,
-    });
+    // --- Step 2: Delete old article relations ---
+    await bonArticleRepo.delete({ bonLivraison: { id: bon.id } });
 
-    // Update articles
+    // Determine if the new status means we should deliver stock
+    const newStatus = status !== undefined ? status : oldStatus;
+    const isNowDelivered = newStatus === "Livré" || newStatus === "Partiellement Livré";
+
+    // --- Step 3: Create new article relations and update BC/stock ---
+    const newArticles = [];
     if (articles && Array.isArray(articles)) {
-      // --- Step 1: Restaurer les quantités livrées dans le bon de commande et stock ---
-      if (bon.bonCommandeClient) {
-        for (const oldItem of bon.articles) {
-          const bonCmdArticle = bon.bonCommandeClient.articles.find(
-            (a) => a.article.id === oldItem.article.id
-          );
-
-          if (bonCmdArticle) {
-            // ✅ Restaurer l'ancienne quantité livrée dans BC
-            bonCmdArticle.quantiteLivree -= oldItem.quantite;
-            // Ensure quantiteLivree doesn't go below 0
-            if (bonCmdArticle.quantiteLivree < 0) {
-              bonCmdArticle.quantiteLivree = 0;
-            }
-            await bonCmdArticleRepo.save(bonCmdArticle);
-          }
-
-          // ✅ Restaurer le stock
-          const articleEntity = await articleRepo.findOneBy({
-            id: oldItem.article.id,
-          });
-          if (articleEntity) {
-            articleEntity.qte += oldItem.quantite;
-            articleEntity.qte_physique += oldItem.quantite;
-            await articleRepo.save(articleEntity);
-          }
-        }
-      } else {
-        // ✅ Restaurer le stock pour les BL sans BC
-        for (const oldItem of bon.articles) {
-          const articleEntity = await articleRepo.findOneBy({
-            id: oldItem.article.id,
-          });
-          if (articleEntity) {
-            articleEntity.qte += oldItem.quantite;
-            articleEntity.qte_physique += oldItem.quantite;
-            await articleRepo.save(articleEntity);
-          }
-        }
-      }
-
-      // --- Step 2: Delete old article relations ---
-      await bonArticleRepo.delete({ bonLivraison: { id: bon.id } });
-
-      // --- Step 3: Create new article relations and update BC/stock ---
-      const newArticles = [];
-
       for (const item of articles) {
-        const article = await articleRepo.findOneBy({
-          id: parseInt(item.article_id),
-        });
+        const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
         if (!article) {
           await queryRunner.rollbackTransaction();
-          return res
-            .status(404)
-            .json({ message: `Article ${item.article_id} introuvable` });
+          return res.status(404).json({ message: `Article ${item.article_id} introuvable` });
         }
 
-        // ✅ FIXED: Use prix_ttc from frontend if provided, otherwise calculate
         let prix_unitaire = parseFloat(item.prix_unitaire);
-        let prix_ttc = parseFloat(item.prix_ttc); // Get prix_ttc from frontend
-
+        let prix_ttc = parseFloat(item.prix_ttc);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
 
-        // If prix_ttc not provided from frontend, calculate it
         if (!prix_ttc || isNaN(prix_ttc)) {
           prix_ttc = prix_unitaire * (1 + tvaRate / 100);
         }
-
-        // Handle tax mode conversion
         if (taxMode === "TTC") {
           prix_unitaire = prix_ttc / (1 + tvaRate / 100);
         }
 
-        const quantite = parseInt(item.quantite);
+        const quantite = parseInt(item.quantite) || 0;
 
-        // ✅ Handle quantity control for BC-linked BL
-        if (bon.bonCommandeClient) {
-          const bonCmdArticle = bon.bonCommandeClient.articles.find(
-            (a) => a.article.id === parseInt(item.article_id)
-          );
+        if (quantite > 0) {
+          // Handle quantity control for BC-linked BL
+          if (bon.bonCommandeClient) {
+            const bonCmdArticle = bon.bonCommandeClient.articles.find(
+              (a) => a.article.id === parseInt(item.article_id)
+            );
 
-          if (bonCmdArticle) {
-            const quantiteRestante =
-              bonCmdArticle.quantite - bonCmdArticle.quantiteLivree;
-
-            // ✅ RULE: Control that delivered quantity doesn't exceed remaining quantity
-            if (quantite > quantiteRestante) {
-              await queryRunner.rollbackTransaction();
-              return res.status(400).json({
-                message: `Quantité invalide pour l'article ${article.designation}. Quantité restante: ${quantiteRestante}, Tentative de livraison: ${quantite}`,
-              });
+            if (bonCmdArticle) {
+              const quantiteRestante = bonCmdArticle.quantite - bonCmdArticle.quantiteLivree;
+              if (quantite > quantiteRestante) {
+                await queryRunner.rollbackTransaction();
+                return res.status(400).json({
+                  message: `Quantité invalide pour l'article ${article.designation}. Quantité restante: ${quantiteRestante}, Tentative de livraison: ${quantite}`,
+                });
+              }
+              bonCmdArticle.quantiteLivree += quantite;
+              await bonCmdArticleRepo.save(bonCmdArticle);
             }
+          }
 
-            // ✅ Update BC with new delivered quantity
-            bonCmdArticle.quantiteLivree += quantite;
-            await bonCmdArticleRepo.save(bonCmdArticle);
+          // Update stock (DEPOT AWARE) ONLY if it's considered delivered
+          if (isNowDelivered) {
+            if (bon.depot) {
+              await updateDepotStock(queryRunner.manager, article.id, bon.depot.id, -quantite);
+            } else {
+              article.qte = (article.qte || 0) - quantite;
+              article.qte_physique = (article.qte_physique || 0) - quantite;
+              await articleRepo.save(article);
+            }
           }
         }
-
-        // ✅ Update stock
-        article.qte = (article.qte || 0) - quantite;
-        article.qte_physique = (article.qte_physique || 0) - quantite;
-        await articleRepo.save(article);
 
         newArticles.push(
           bonArticleRepo.create({
             bonLivraison: bon,
             article,
-            quantite: quantite,
+            quantite,
             prix_unitaire,
-            prix_ttc: prix_ttc,
-            designation: item.designation || article.designation || "", // ADD THIS LINE
-            // ✅ Store the TTC price from frontend
+            prix_ttc,
+            designation: item.designation || article.designation || "",
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
           })
         );
       }
+    }
 
-      bon.articles = newArticles;
+    bon.articles = newArticles;
 
-      // --- Step 4: Mettre à jour le statut du bon de commande ---
-      if (bon.bonCommandeClient) {
-        const updatedBonCmd = await bonCmdClientRepo.findOne({
-          where: { id: bon.bonCommandeClient.id },
-          relations: ["articles"],
-        });
+    // Update BC status
+    if (bon.bonCommandeClient) {
+      const updatedBonCmd = await bonCmdClientRepo.findOne({
+        where: { id: bon.bonCommandeClient.id },
+        relations: ["articles"],
+      });
 
-        let totalQuantiteBC = updatedBonCmd.articles.reduce(
-          (sum, item) => sum + item.quantite,
-          0
-        );
-        let totalLivreeBC = updatedBonCmd.articles.reduce(
-          (sum, item) => sum + item.quantiteLivree,
-          0
-        );
+      const totalQuantiteBC = updatedBonCmd.articles.reduce((sum, item) => sum + item.quantite, 0);
+      const totalLivreeBC = updatedBonCmd.articles.reduce((sum, item) => sum + item.quantiteLivree, 0);
 
-        let bcStatus = "Confirme";
-        if (totalLivreeBC === totalQuantiteBC && totalQuantiteBC > 0) {
-          bcStatus = "Livre";
-        } else if (totalLivreeBC > 0 && totalLivreeBC < totalQuantiteBC) {
-          bcStatus = "Partiellement Livre";
-        }
-
-        updatedBonCmd.status = bcStatus;
-        await bonCmdClientRepo.save(updatedBonCmd);
+      let bcStatus = "Confirme";
+      if (totalLivreeBC === totalQuantiteBC && totalQuantiteBC > 0) {
+        bcStatus = "Livre";
+      } else if (totalLivreeBC > 0 && totalLivreeBC < totalQuantiteBC) {
+        bcStatus = "Partiellement Livre";
       }
+
+      updatedBonCmd.status = bcStatus;
+      await bonCmdClientRepo.save(updatedBonCmd);
     }
 
     const updated = await bonRepo.save(bon);
@@ -654,6 +650,7 @@ exports.updateBonLivraison = async (req, res) => {
     await queryRunner.release();
   }
 };
+
 // ✅ DELETE - Restore everything properly
 exports.deleteBonLivraison = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -676,6 +673,7 @@ exports.deleteBonLivraison = async (req, res) => {
       relations: [
         "articles",
         "articles.article",
+        "depot",
         "bonCommandeClient",
         "bonCommandeClient.articles",
         "bonCommandeClient.articles.article",
@@ -687,15 +685,19 @@ exports.deleteBonLivraison = async (req, res) => {
       return res.status(404).json({ message: "Bon de livraison introuvable" });
     }
 
-    // ✅ RULE: Restore stock before deleting
+    // ✅ RULE: Restore stock before deleting (DEPOT AWARE)
     for (const item of bon.articles) {
-      const articleEntity = await articleRepo.findOneBy({
-        id: item.article.id,
-      });
-      if (articleEntity) {
-        articleEntity.qte += item.quantite;
-        articleEntity.qte_physique += item.quantite;
-        await articleRepo.save(articleEntity);
+      if (bon.depot) {
+        await updateDepotStock(queryRunner.manager, item.article.id, bon.depot.id, item.quantite);
+      } else {
+        const articleEntity = await articleRepo.findOneBy({
+          id: item.article.id,
+        });
+        if (articleEntity) {
+          articleEntity.qte += item.quantite;
+        //  articleEntity.qte_physique += item.quantite;
+          await articleRepo.save(articleEntity);
+        }
       }
     }
 
@@ -786,7 +788,7 @@ exports.annulerBonLivraison = async (req, res) => {
     for (const bonArticle of bon.articles) {
       const article = bonArticle.article;
       article.qte = (article.qte || 0) + bonArticle.quantite;
-      article.qte_physique = (article.qte_physique || 0) + bonArticle.quantite;
+    //  article.qte_physique = (article.qte_physique || 0) + bonArticle.quantite;
       await articleRepo.save(article);
     }
 
@@ -877,7 +879,7 @@ exports.annulerBonLivraison = async (req, res) => {
     for (const bonArticle of bon.articles) {
       const article = bonArticle.article;
       article.qte = (article.qte || 0) + bonArticle.quantite;
-      article.qte_physique = (article.qte_physique || 0) + bonArticle.quantite;
+    //  article.qte_physique = (article.qte_physique || 0) + bonArticle.quantite;
       await articleRepo.save(article);
     }
 

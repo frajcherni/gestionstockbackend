@@ -178,9 +178,29 @@ exports.createArticle = async (req, res) => {
 
 exports.getAllArticles = async (req, res) => {
   try {
-    const articles = await AppDataSource.getRepository(Article).find({
-      relations: ["categorie", "fournisseur", "sousCategorie"],
-    });
+    const depotId = req.query.depot_id;
+    const articleRepo = AppDataSource.getRepository(Article);
+    
+    let articles;
+    if (depotId) {
+      const { entities, raw } = await articleRepo.createQueryBuilder("article")
+        .leftJoinAndSelect("article.categorie", "categorie")
+        .leftJoinAndSelect("article.fournisseur", "fournisseur")
+        .leftJoinAndSelect("article.sousCategorie", "sousCategorie")
+        .leftJoin("article.stocks", "stock", "stock.depot_id = :depotId", { depotId: parseInt(depotId) })
+        .addSelect("stock.qte", "article_qte_depot")
+        .getRawAndEntities();
+      
+      // Override qte with depot stock
+      articles = entities.map((a, index) => {
+        a.qte = parseInt(raw[index].article_qte_depot) || 0;
+        return a;
+      });
+    } else {
+      articles = await articleRepo.find({
+        relations: ["categorie", "fournisseur", "sousCategorie"],
+      });
+    }
 
     // Add full URL for images
     const articlesWithImageUrl = articles.map((article) => ({
@@ -589,6 +609,7 @@ exports.searchArticles = async (req, res) => {
     const offset = (pageNumber - 1) * limitNumber;
 
     const repo = AppDataSource.getRepository(Article);
+    const depotId = req.body.depot_id;
 
     // --- Build query with active filter ---
     const qb = repo.createQueryBuilder("article")
@@ -602,7 +623,15 @@ exports.searchArticles = async (req, res) => {
         "article.puv_ttc",
         "article.tva",
         "article.active",
+        "article.image",
       ]);
+
+    if (depotId) {
+      qb.leftJoin("article.stocks", "stock", "stock.depot_id = :depotId", { depotId: parseInt(depotId) })
+        .addSelect("stock.qte", "article_qte_depot");
+    } else {
+      qb.addSelect("article.qte");
+    }
 
     // Always filter active articles first
     qb.where("article.active = :active", { active: true });
@@ -619,17 +648,23 @@ exports.searchArticles = async (req, res) => {
     const total = await qb.clone().getCount();
 
     // --- Apply pagination safely ---
-    const articles = await qb
+    const { entities, raw } = await qb
       .orderBy("article.designation", "ASC")
       .offset(offset)
       .limit(limitNumber)
-      .getMany();
+      .getRawAndEntities();
 
-    // --- Add full image URL ---
-    const articlesWithUrls = articles.map(a => ({
-      ...a,
-      image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null
-    }));
+    // --- Add full image URL and Map depot stock ---
+    const articlesWithUrls = entities.map((a, index) => {
+      const result = {
+        ...a,
+        image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null
+      };
+      if (depotId) {
+        result.qte = parseInt(raw[index].article_qte_depot) || 0;
+      }
+      return result;
+    });
 
     res.json({
       articles: articlesWithUrls,

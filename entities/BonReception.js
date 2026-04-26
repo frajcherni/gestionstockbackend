@@ -44,6 +44,13 @@ const BonReception = new EntitySchema({
       cascade: true,
       eager: true,
     },
+    depot: {
+      type: "many-to-one",
+      target: "Depot",
+      eager: true,
+      joinColumn: { name: "depot_id" },
+      nullable: true,
+    },
   },
 });
 

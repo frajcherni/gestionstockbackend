@@ -6,6 +6,8 @@ const {
 const { BonCommande } = require("../entities/BonCommande");
 const { Article } = require("../entities/Article");
 const { Fournisseur } = require("../entities/Fournisseur");
+const { Depot } = require("../entities/Depot");
+const { updateDepotStock } = require("../utils/stockUtils");
 
 /**
  * Status rules for stock handling
@@ -41,6 +43,7 @@ exports.createBonReception = async (req, res) => {
       remise,
       remiseType,
       fournisseur_id,
+      depot_id,
     } = req.body;
 
     const bonCommandeRepo = AppDataSource.getRepository(BonCommande);
@@ -58,6 +61,12 @@ exports.createBonReception = async (req, res) => {
     });
     if (!fournisseur)
       return res.status(404).json({ message: "Fournisseur non trouvé" });
+
+    const depotRepo = AppDataSource.getRepository(Depot);
+    let depot = null;
+    if (depot_id) {
+      depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
+    }
 
     // ✅ Optionally link to an existing bon de commande (but don't modify it)
     let bonCommande = null;
@@ -80,6 +89,7 @@ exports.createBonReception = async (req, res) => {
       remise: remise || 0,
       remiseType: remiseType || "percentage",
       bonCommande: bonCommande || null,
+      depot: depot,
       articles: [],
     };
 
@@ -99,11 +109,15 @@ exports.createBonReception = async (req, res) => {
       const remiseArticle =
         item.remise !== undefined ? parseFloat(item.remise) : null;
 
-      // ✅ Update stock (physical + total)
-      article.qte = (article.qte || 0) + qty;
-      article.qte_physique = (article.qte_physique || 0) + qty;
-
-      await articleRepo.save(article);
+      // ✅ Update stock (depot + total) using utility
+      if (depot_id) {
+        await updateDepotStock(AppDataSource.manager, article.id, parseInt(depot_id), qty);
+      } else {
+        // Fallback for global stock if no depot
+        article.qte = (article.qte || 0) + qty;
+        article.qte_physique = (article.qte_physique || 0) + qty;
+        await articleRepo.save(article);
+      }
 
       bonReception.articles.push({
         article,
@@ -164,6 +178,7 @@ exports.updateBonReception = async (req, res) => {
       remise,
       remiseType,
       fournisseur_id,
+      depot_id,
     } = req.body;
 
     const receptionRepo = AppDataSource.getRepository(BonReception);
@@ -195,11 +210,15 @@ exports.updateBonReception = async (req, res) => {
 
       // 1) Reverse stock effect of OLD lines (remove previously added stock)
       for (const oldItem of reception.articles) {
-        const art = await trxArticleRepo.findOneBy({ id: oldItem.article.id });
-        if (!art) continue;
-        art.qte = (art.qte || 0) - (oldItem.quantite || 0);
-        art.qte_physique = (art.qte_physique || 0) - (oldItem.quantite || 0);
-        await trxArticleRepo.save(art);
+        if (reception.depot?.id) {
+          await updateDepotStock(tm, oldItem.article.id, reception.depot.id, -(oldItem.quantite || 0));
+        } else {
+          const art = await trxArticleRepo.findOneBy({ id: oldItem.article.id });
+          if (!art) continue;
+          art.qte = (art.qte || 0) - (oldItem.quantite || 0);
+          art.qte_physique = (art.qte_physique || 0) - (oldItem.quantite || 0);
+          await trxArticleRepo.save(art);
+        }
       }
 
       // 2) Delete ALL old BonReceptionArticle entries for this reception
@@ -224,6 +243,11 @@ exports.updateBonReception = async (req, res) => {
         reception.fournisseur = fournisseur;
       }
 
+      if (depot_id) {
+        const depot = await tm.getRepository(Depot).findOneBy({ id: parseInt(depot_id) });
+        reception.depot = depot;
+      }
+
       // 4) Recreate new BonReceptionArticle rows and apply NEW stock effect
       const createdBonArticles = [];
       if (Array.isArray(articles)) {
@@ -243,9 +267,13 @@ exports.updateBonReception = async (req, res) => {
             item.remise !== undefined ? parseFloat(item.remise) : null;
 
           // increase stock for reception
-          art.qte = (art.qte || 0) + qty;
-          art.qte_physique = (art.qte_physique || 0) + qty;
-          await trxArticleRepo.save(art);
+          if (depot_id) {
+            await updateDepotStock(tm, art.id, parseInt(depot_id), qty);
+          } else {
+            art.qte = (art.qte || 0) + qty;
+            art.qte_physique = (art.qte_physique || 0) + qty;
+            await trxArticleRepo.save(art);
+          }
 
           const newBonArt = trxBonArticleRepo.create({
             bonReception: reception,
@@ -301,11 +329,15 @@ exports.deleteBonReception = async (req, res) => {
 
     // 1️⃣ Reverse stock effect (subtract previously added quantities)
     for (const item of bon.articles) {
-      const article = await articleRepo.findOneBy({ id: item.article.id });
-      if (article) {
-        article.qte = (article.qte || 0) - item.quantite;
-        article.qte_physique = (article.qte_physique || 0) - item.quantite;
-        await articleRepo.save(article);
+      if (bon.depot?.id) {
+        await updateDepotStock(AppDataSource.manager, item.article.id, bon.depot.id, -item.quantite);
+      } else {
+        const article = await articleRepo.findOneBy({ id: item.article.id });
+        if (article) {
+          article.qte = (article.qte || 0) - item.quantite;
+          article.qte_physique = (article.qte_physique || 0) - item.quantite;
+          await articleRepo.save(article);
+        }
       }
     }
 

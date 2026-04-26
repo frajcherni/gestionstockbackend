@@ -118,6 +118,13 @@ const FactureClient = new EntitySchema({
       joinColumn: { name: "vendeur_id" },
       nullable: true,
     },
+    depot: {
+      type: "many-to-one",
+      target: "Depot",
+      eager: true,
+      joinColumn: { name: "depot_id" },
+      nullable: true,
+    },
     venteComptoire: {
       type: "many-to-one",
       target: "VenteComptoire",

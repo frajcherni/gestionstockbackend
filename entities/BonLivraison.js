@@ -77,6 +77,12 @@ const BonLivraison = new EntitySchema({
       eager: true,
       joinColumn: { name: "vendeur_id" },
     },
+    depot: {
+      type: "many-to-one",
+      target: "Depot",
+      eager: true,
+      joinColumn: { name: "depot_id" },
+    },
     bonCommandeClient: {
       type: "many-to-one",
       target: "BonCommandeClient",

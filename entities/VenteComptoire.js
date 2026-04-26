@@ -53,6 +53,12 @@ const VenteComptoire = new EntitySchema({
       eager: true,
       joinColumn: { name: "vendeur_id" },
     },
+    depot: {
+      type: "many-to-one",
+      target: "Depot",
+      eager: true,
+      joinColumn: { name: "depot_id" },
+    },
     articles: {
       type: "one-to-many",
       target: "VenteComptoireArticle",

@@ -1,6 +1,8 @@
+const { Depot } = require("../entities/Depot");
+const { updateDepotStock } = require("../utils/stockUtils");
 const { AppDataSource } = require("../db");
-const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
+const { Article } = require("../entities/Article");
 const { Vendeur } = require("../entities/Vendeur");
 const { BonLivraison } = require("../entities/BonLivraison");
 const { BonCommandeClient } = require("../entities/BonCommandeClient");
@@ -171,11 +173,10 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
       .createQueryBuilder("facture")
       .leftJoinAndSelect("facture.client", "client")
       .leftJoinAndSelect("facture.vendeur", "vendeur")
+      .leftJoinAndSelect("facture.depot", "depot")
       .leftJoinAndSelect("facture.bonLivraison", "bonLivraison")
-      .leftJoinAndSelect("bonLivraison.paiements", "blPaiements")
-      .leftJoinAndSelect("facture.bonCommandeClient", "bonCommandeClient")
       .leftJoinAndSelect("facture.venteComptoire", "venteComptoire")
-      .leftJoinAndSelect("bonCommandeClient.paiements", "bcPaiements")
+      .leftJoinAndSelect("facture.bonCommandeClient", "bonCommandeClient")
       .leftJoinAndSelect("facture.articles", "articles")
       .leftJoinAndSelect("articles.article", "article");
 
@@ -343,6 +344,7 @@ exports.createFactureClient = async (req, res) => {
       conditions,
       client_id,
       vendeur_id,
+      depot_id,
       bonLivraison_id,
       articles,
       modeReglement,
@@ -368,6 +370,7 @@ exports.createFactureClient = async (req, res) => {
     console.log(exoneration)
     const clientRepo = AppDataSource.getRepository(Client);
     const vendeurRepo = AppDataSource.getRepository(Vendeur);
+    const depotRepo = AppDataSource.getRepository(Depot);
     const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
     const articleRepo = AppDataSource.getRepository(Article);
     const factureRepo = AppDataSource.getRepository(FactureClient);
@@ -478,6 +481,7 @@ exports.createFactureClient = async (req, res) => {
       espaceNotes: espaceNotes || null,
       montantRetenue: parseFloat(montantRetenue || 0),
       hasRetenue: !!hasRetenue,
+      depot: depot_id ? await depotRepo.findOneBy({ id: parseInt(depot_id) }) : null,
       articles: [],
     };
 
@@ -522,6 +526,13 @@ exports.createFactureClient = async (req, res) => {
         remise: item.remise ? parseFloat(item.remise) : 0,
       };
       facture.articles.push(factureArticle);
+
+      // REDUCE STOCK ONLY IF DIRECT FACTURE (not from BL or Vente which already move stock)
+      // Actually, user wants to reduce stock from selected depot.
+      // If it's from VenteComptoire or BonLivraison, we assume they already handled it.
+      if (!bonLivraison_id && !venteComptoire_id && facture.depot) {
+        await updateDepotStock(AppDataSource.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+      }
     }
 
     const result = await factureRepo.save(facture);
@@ -552,6 +563,7 @@ exports.updateFactureClient = async (req, res) => {
       totalTVA,
       client_id,
       vendeur_id,
+      depot_id,
       exoneration,
       timbreFiscal,
       articles,
@@ -562,11 +574,12 @@ exports.updateFactureClient = async (req, res) => {
     const clientRepo = AppDataSource.getRepository(Client);
     const vendeurRepo = AppDataSource.getRepository(Vendeur);
     const articleRepo = AppDataSource.getRepository(Article);
+    const depotRepo = AppDataSource.getRepository(Depot);
 
     // Vérifier si la facture existe
     const facture = await factureRepo.findOne({
       where: { id: parseInt(id) },
-      relations: ["articles", "client", "vendeur"],
+      relations: ["articles", "articles.article", "client", "vendeur", "depot", "venteComptoire", "bonLivraison"],
     });
 
     if (!facture) {
@@ -608,7 +621,24 @@ exports.updateFactureClient = async (req, res) => {
       facture.vendeur = vendeur;
     }
 
-    // Articles
+    // Depot
+    if (depot_id) {
+      const depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
+      if (!depot) {
+        return res.status(404).json({ message: "Depot non trouvé" });
+      }
+      facture.depot = depot;
+    }
+
+    // RESTORE OLD STOCK IF DIRECT FACTURE
+    if (!facture.venteComptoire && !facture.bonLivraison && facture.depot && facture.articles) {
+      for (const oldItem of facture.articles) {
+        if (oldItem.article) {
+          await updateDepotStock(AppDataSource.manager, oldItem.article.id, facture.depot.id, parseInt(oldItem.quantite));
+        }
+      }
+    }
+
     // Articles
     if (articles && Array.isArray(articles)) {
       console.log(articles);
@@ -645,6 +675,11 @@ exports.updateFactureClient = async (req, res) => {
 
         console.log(factureArticle);
         newArticles.push(factureArticle);
+
+        // REDUCE NEW STOCK IF DIRECT FACTURE
+        if (!facture.venteComptoire && !facture.bonLivraison && facture.depot) {
+          await updateDepotStock(AppDataSource.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+        }
       }
 
       // Remplace les anciens articles → grâce à cascade + onDelete: "CASCADE"

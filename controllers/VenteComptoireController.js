@@ -6,8 +6,14 @@ const {
   VenteComptoire,
   VenteComptoireArticle,
 } = require("../entities/VenteComptoire");
+const { Depot } = require("../entities/Depot");
+const { updateDepotStock } = require("../utils/stockUtils");
 
 exports.createVenteComptoire = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
     const {
       numeroCommande,
@@ -17,6 +23,7 @@ exports.createVenteComptoire = async (req, res) => {
       notes,
       client_id,
       vendeur_id,
+      depot_id,
       articles,
       taxMode,
       // ✅ ADD PAYMENT FIELDS
@@ -25,10 +32,11 @@ exports.createVenteComptoire = async (req, res) => {
       espaceNotes,
     } = req.body;
 
-    const clientRepo = AppDataSource.getRepository(Client);
-    const vendeurRepo = AppDataSource.getRepository(Vendeur);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const venteRepo = AppDataSource.getRepository(VenteComptoire);
+    const clientRepo = queryRunner.manager.getRepository(Client);
+    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const venteRepo = queryRunner.manager.getRepository(VenteComptoire);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
 
     if (!numeroCommande || !client_id || !vendeur_id || !dateCommande) {
       return res
@@ -55,6 +63,7 @@ exports.createVenteComptoire = async (req, res) => {
       notes: notes || null,
       client,
       vendeur,
+      depot: depot_id ? await depotRepo.findOneBy({ id: parseInt(depot_id) }) : null,
       taxMode,
       // ✅ ADD PAYMENT DATA
       paymentMethods: paymentMethods || [],
@@ -154,6 +163,15 @@ exports.createVenteComptoire = async (req, res) => {
         remise: remiseRate || null,
       };
       vente.articles.push(venteArticle);
+
+      // ✅ REDUCE STOCK (DEPOT AWARE)
+      if (vente.depot) {
+        await updateDepotStock(queryRunner.manager, article.id, vente.depot.id, -quantite);
+      } else {
+        article.qte -= quantite;
+        article.qte_physique -= quantite;
+        await articleRepo.save(article);
+      }
     }
 
     const totalAfterRemise =
@@ -165,6 +183,7 @@ exports.createVenteComptoire = async (req, res) => {
     vente.totalAfterRemise = totalAfterRemise;
 
     const result = await venteRepo.save(vente);
+    await queryRunner.commitTransaction();
     res.status(201).json({
       ...result,
       subTotal: subTotal.toFixed(3),
@@ -180,17 +199,22 @@ exports.createVenteComptoire = async (req, res) => {
 };
 
 exports.updateVenteComptoire = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
-    const venteRepo = AppDataSource.getRepository(VenteComptoire);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const venteArticleRepo = AppDataSource.getRepository(VenteComptoireArticle);
-    const clientRepo = AppDataSource.getRepository(Client);
-    const vendeurRepo = AppDataSource.getRepository(Vendeur);
+    const venteRepo = queryRunner.manager.getRepository(VenteComptoire);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const venteArticleRepo = queryRunner.manager.getRepository(VenteComptoireArticle);
+    const clientRepo = queryRunner.manager.getRepository(Client);
+    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
 
     // --- Load existing vente comptoire ---
     const vente = await venteRepo.findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["articles", "articles.article", "client", "vendeur"],
+      relations: ["articles", "articles.article", "client", "vendeur", "depot"],
     });
 
     if (!vente) {
@@ -311,8 +335,35 @@ exports.updateVenteComptoire = async (req, res) => {
       updates.vendeur = vendeur;
     }
 
+    if (req.body.depot_id) {
+      const depot = await depotRepo.findOneBy({
+        id: parseInt(req.body.depot_id),
+      });
+      if (!depot) {
+        await queryRunner.rollbackTransaction();
+        return res.status(404).json({ message: "Dépôt non trouvé" });
+      }
+      updates.depot = depot;
+    }
+
     // --- Apply updates to parent record ---
     await venteRepo.update(vente.id, updates);
+
+    // --- Restore stock from old articles (DEPOT AWARE) ---
+    if (req.body.articles && Array.isArray(req.body.articles)) {
+      for (const oldItem of vente.articles) {
+        if (vente.depot) {
+          await updateDepotStock(queryRunner.manager, oldItem.article.id, vente.depot.id, oldItem.quantite);
+        } else {
+          const articleEntity = await articleRepo.findOneBy({ id: oldItem.article.id });
+          if (articleEntity) {
+            articleEntity.qte += oldItem.quantite;
+            articleEntity.qte_physique += oldItem.quantite;
+            await articleRepo.save(articleEntity);
+          }
+        }
+      }
+    }
 
     // --- Handle articles (with deletion & insertion logic) ---
     if (req.body.articles && Array.isArray(req.body.articles)) {
@@ -381,25 +432,37 @@ exports.updateVenteComptoire = async (req, res) => {
           existing.fodec = hasFodec; // ✅ UPDATE FODEC FLAG
           existing.tva = tvaRate;
           existing.remise = item.remise ? parseFloat(item.remise) : null;
+          existing.designation = item.designation || article.designation || "";
           await venteArticleRepo.save(existing);
         } else {
-          // Insert new line
-          const venteArticle = venteArticleRepo.create({
-            venteComptoire: { id: vente.id },
-            article,
+          // Create new line
+          const newArticle = venteArticleRepo.create({
+            venteComptoire: vente,
+            article: article,
             quantite: parseInt(item.quantite),
-            prixUnitaire,
+            prixUnitaire: prixUnitaire,
             prix_ttc: prix_ttc,
-            designation: item.designation || article.designation || "", // ADD THIS LINE
-            fodec: hasFodec, // ✅ SAVE FODEC FLAG
+            fodec: hasFodec,
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
+            designation: item.designation || article.designation || "",
           });
-          await venteArticleRepo.save(venteArticle);
+          await venteArticleRepo.save(newArticle);
+        }
+
+        // --- Reduce stock for new/updated articles (DEPOT AWARE) ---
+        const currentDepot = updates.depot || vente.depot;
+        if (currentDepot) {
+          await updateDepotStock(queryRunner.manager, article.id, currentDepot.id, -parseInt(item.quantite));
+        } else {
+          article.qte = (article.qte || 0) - parseInt(item.quantite);
+          article.qte_physique = (article.qte_physique || 0) - parseInt(item.quantite);
+          await articleRepo.save(article);
         }
       }
     }
     // --- Reload and return updated vente ---
+    await queryRunner.commitTransaction();
     const updatedVente = await venteRepo.findOne({
       where: { id: vente.id },
       relations: ["client", "vendeur", "articles", "articles.article"],
@@ -407,8 +470,11 @@ exports.updateVenteComptoire = async (req, res) => {
 
     res.json(updatedVente);
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error("Erreur updateVenteComptoire:", err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 
@@ -465,21 +531,52 @@ exports.getAllVenteComptoire = async (req, res) => {
 };
 
 exports.deleteVenteComptoire = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
-    const venteArticleRepo = AppDataSource.getRepository(VenteComptoireArticle);
-    const venteRepo = AppDataSource.getRepository(VenteComptoire);
+    const venteRepo = queryRunner.manager.getRepository(VenteComptoire);
+    const venteArticleRepo = queryRunner.manager.getRepository(VenteComptoireArticle);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+
+    const vente = await venteRepo.findOne({
+      where: { id: parseInt(req.params.id) },
+      relations: ["articles", "articles.article", "depot"],
+    });
+
+    if (!vente) {
+      await queryRunner.rollbackTransaction();
+      return res.status(404).json({ message: "Vente non trouvée" });
+    }
+
+    // --- Restore stock (DEPOT AWARE) ---
+    for (const item of vente.articles) {
+      if (vente.depot) {
+        await updateDepotStock(queryRunner.manager, item.article.id, vente.depot.id, item.quantite);
+      } else {
+        const articleEntity = await articleRepo.findOneBy({ id: item.article.id });
+        if (articleEntity) {
+          articleEntity.qte += item.quantite;
+          articleEntity.qte_physique += item.quantite;
+          await articleRepo.save(articleEntity);
+        }
+      }
+    }
 
     await venteArticleRepo.delete({
-      venteComptoire: { id: parseInt(req.params.id) },
+      venteComptoire: { id: vente.id },
     });
-    const result = await venteRepo.delete(req.params.id);
+    const result = await venteRepo.delete(vente.id);
 
-    if (result.affected === 0)
-      return res.status(404).json({ message: "Vente non trouvée" });
+    await queryRunner.commitTransaction();
     res.status(200).json({ message: "Vente supprimée avec succès" });
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 

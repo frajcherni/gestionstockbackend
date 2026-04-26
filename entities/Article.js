@@ -4,7 +4,7 @@ const Article = new EntitySchema({
     name: "Article",
     tableName: "articles",
     columns: {
-        id: { type: "int", primary: true , generated:false}, // remove generated:true
+        id: { type: "int", primary: true, generated: false }, // remove generated:true
         reference: { type: "varchar", nullable: true },
         designation: { type: "varchar", nullable: true },
         pua_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
@@ -13,12 +13,13 @@ const Article = new EntitySchema({
         code_barre: { type: "varchar", unique: false, nullable: true }, // NOUVEAU CHAMP
         code_barres: { type: "simple-array", nullable: true }, // CHANGÉ: tableau de codes barres
 
-    
+
         tva: { type: "int", nullable: true },
         puv_ttc: { type: "decimal", precision: 10, scale: 3, nullable: true },
         type: { type: "varchar", nullable: true },
         qte: { type: "int", nullable: true },
         qte_virtual: { type: "int", default: 0, nullable: true },
+        qte_physique: { type: "int", default: 0, nullable: true },
         nom: { type: "varchar", nullable: true },
         taux_fodec: { type: "boolean", nullable: true },
         image: { type: "varchar", nullable: true },
@@ -30,11 +31,11 @@ const Article = new EntitySchema({
         website_description: { type: "text", nullable: true },
         website_images: { type: "simple-array", nullable: true },
         website_order: { type: "int", default: 0, nullable: true },
-           active: { 
-        type: "boolean", 
-        default: true, 
-        nullable: false 
-    },
+        active: {
+            type: "boolean",
+            default: true,
+            nullable: false
+        },
     },
     relations: {
         categorie: {
