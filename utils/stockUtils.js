@@ -36,16 +36,16 @@ async function updateDepotStock(entityManager, articleId, depotId, quantityChang
   const allStocks = await stockRepo.find({
     where: { article_id: articleId }
   });
-  
+
   const totalStock = allStocks.reduce((sum, s) => sum + (s.qte || 0), 0);
-  
+
   // We also update qte_physique to keep it in sync if needed, 
   // though the user specifically asked about depot stock.
-  await articleRepo.update(articleId, { 
+  await articleRepo.update(articleId, {
     qte: totalStock,
-    qte_physique: totalStock 
+    qte_physique: totalStock
   });
-  
+
   return stockDepot;
 }
 

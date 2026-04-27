@@ -3,6 +3,7 @@ const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
 const { ClientWebsite } = require("../entities/ClientWebsite");
 const { Vendeur } = require("../entities/Vendeur");
+const { Depot } = require("../entities/Depot");
 const {
   BonCommandeClient,
   BonCommandeClientArticle,
@@ -11,6 +12,7 @@ const {
   BonLivraison,
   BonLivraisonArticle,
 } = require("../entities/BonLivraison");
+const { updateDepotStock } = require("../utils/stockUtils");
 
 exports.createBonCommandeClient = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -27,6 +29,7 @@ exports.createBonCommandeClient = async (req, res) => {
       notes,
       client_id,
       vendeur_id,
+      depot_id,
       articles,
       taxMode,
       totalTTC,
@@ -38,13 +41,20 @@ exports.createBonCommandeClient = async (req, res) => {
       totalPaymentAmount,
       espaceNotes
     } = req.body;
-    
+
 
     const clientRepo = queryRunner.manager.getRepository(Client);
     const clientWebsiteRepo = queryRunner.manager.getRepository(ClientWebsite);
     const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
     const articleRepo = queryRunner.manager.getRepository(Article);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
     const bonRepo = queryRunner.manager.getRepository(BonCommandeClient);
+
+    // Resolve depot if provided
+    let depot = null;
+    if (depot_id) {
+      depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
+    }
 
     // Validate required fields
     if (!numeroCommande || !dateCommande) {
@@ -99,10 +109,10 @@ exports.createBonCommandeClient = async (req, res) => {
     let totalLivree = 0;
 
     const hasPayments = paymentMethods && paymentMethods.length > 0;
-    
+
     // CHECK IF THERE'S A RETENUE PAYMENT METHOD
     const hasRetenue = hasPayments && paymentMethods.some(pm => pm.method === "retenue");
-    
+
     // CALCULATE RETENTION AMOUNT
     let montantRetenue = 0;
     if (hasRetenue) {
@@ -112,10 +122,10 @@ exports.createBonCommandeClient = async (req, res) => {
     }
 
     // CALCULATE TOTAL PAYMENT AMOUNT (EXCLUDE RETENUE FROM ACTUAL PAYMENTS)
-    const actualPaymentAmount = hasPayments 
+    const actualPaymentAmount = hasPayments
       ? paymentMethods
-          .filter(pm => pm.method !== "retenue")
-          .reduce((sum, pm) => sum + (parseFloat(pm.amount) || 0), 0)
+        .filter(pm => pm.method !== "retenue")
+        .reduce((sum, pm) => sum + (parseFloat(pm.amount) || 0), 0)
       : 0;
 
     // CALCULATE RESTE A PAYER (SUBTRACT RETENTION FROM TOTAL)
@@ -125,7 +135,7 @@ exports.createBonCommandeClient = async (req, res) => {
     const bonCommande = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
-      dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : null, // Add this line
+      dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : null,
 
       status: "Confirme",
       remise: remise || 0,
@@ -133,6 +143,7 @@ exports.createBonCommandeClient = async (req, res) => {
       notes: notes || null,
       client,
       clientWebsite,
+      depot: depot || null,  // ✅ Store the depot on the BC
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
       totalTTC: parseFloat(totalTTC || 0),
@@ -166,7 +177,7 @@ exports.createBonCommandeClient = async (req, res) => {
       let prixUnitaire = parseFloat(item.prix_unitaire);
 
       let prix_ttc = parseFloat(item.prix_ttc);
-      console.log(prix_ttc,'prix_ttc')
+      console.log(prix_ttc, 'prix_ttc')
       const tvaRate = item.tva || 0;
 
       if (taxMode === "TTC") {
@@ -191,11 +202,16 @@ exports.createBonCommandeClient = async (req, res) => {
         });
       }
 
-      // ✅ REDUCE STOCK if quantiteLivree > 0
+      // ✅ REDUCE STOCK (qte_sortie) if quantiteLivree > 0 — depot-aware
       if (quantiteLivree > 0) {
-        article.qte -= quantiteLivree;
-        article.qte_physique -= quantiteLivree;
-        await articleRepo.save(article);
+        if (depot) {
+          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteLivree);
+        } else {
+          // Fallback: update global stock when no depot is set
+          article.qte -= quantiteLivree;
+          article.qte_physique -= quantiteLivree;
+          await articleRepo.save(article);
+        }
       }
 
       totalQuantite += quantite;
@@ -257,12 +273,13 @@ exports.updateBonCommandeClient = async (req, res) => {
     const bonArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
     const clientRepo = queryRunner.manager.getRepository(Client);
     const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
     const bonLivRepo = queryRunner.manager.getRepository(BonLivraison);
 
     // --- Load existing bon ---
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["articles", "articles.article", "client", "vendeur"],
+      relations: ["articles", "articles.article", "client", "vendeur", "depot"],
     });
 
     if (!bon) {
@@ -321,10 +338,10 @@ exports.updateBonCommandeClient = async (req, res) => {
 
     // --- CHECK FOR RETENUE AND CALCULATE ---
     const hasPayments = req.body.paymentMethods && req.body.paymentMethods.length > 0;
-    
+
     // CHECK IF THERE'S A RETENUE PAYMENT METHOD
     const hasRetenue = hasPayments && req.body.paymentMethods.some(pm => pm.method === "retenue");
-    
+
     // CALCULATE RETENTION AMOUNT
     let montantRetenue = 0;
     if (hasRetenue) {
@@ -334,10 +351,10 @@ exports.updateBonCommandeClient = async (req, res) => {
     }
 
     // CALCULATE TOTAL PAYMENT AMOUNT (EXCLUDE RETENUE FROM ACTUAL PAYMENTS)
-    const actualPaymentAmount = hasPayments 
+    const actualPaymentAmount = hasPayments
       ? req.body.paymentMethods
-          .filter(pm => pm.method !== "retenue")
-          .reduce((sum, pm) => sum + (parseFloat(pm.amount) || 0), 0)
+        .filter(pm => pm.method !== "retenue")
+        .reduce((sum, pm) => sum + (parseFloat(pm.amount) || 0), 0)
       : 0;
 
     // CALCULATE RESTE A PAYER (SUBTRACT RETENTION FROM TOTAL)
@@ -346,12 +363,12 @@ exports.updateBonCommandeClient = async (req, res) => {
 
     // --- Build updates object safely ---
     const updates = {};
-    
+
     // Basic fields
     if (req.body.dateCommande) updates.dateCommande = new Date(req.body.dateCommande);
     if (req.body.dateLivBonCommande !== undefined) {
-      updates.dateLivBonCommande = req.body.dateLivBonCommande 
-        ? new Date(req.body.dateLivBonCommande) 
+      updates.dateLivBonCommande = req.body.dateLivBonCommande
+        ? new Date(req.body.dateLivBonCommande)
         : null;
     }
     updates.status = newStatus;
@@ -399,6 +416,12 @@ exports.updateBonCommandeClient = async (req, res) => {
       updates.vendeur = vendeur;
     }
 
+    // Update depot if provided
+    if (req.body.depot_id) {
+      const newDepot = await depotRepo.findOneBy({ id: parseInt(req.body.depot_id) });
+      if (newDepot) updates.depot = newDepot;
+    }
+
     // --- Apply updates using save() instead of update() to avoid property validation issues ---
     const updatedBon = Object.assign(bon, updates);
     await bonRepo.save(updatedBon);
@@ -413,18 +436,26 @@ exports.updateBonCommandeClient = async (req, res) => {
 
       // Calculate stock adjustments for removed or modified articles
       for (const existingItem of existingArticles) {
-        const newItem = req.body.articles.find(item => 
+        const newItem = req.body.articles.find(item =>
           parseInt(item.article_id) === existingItem.article.id
         );
 
         if (!newItem) {
-          // Article removed - restore stock for previously delivered quantity
+          // Article removed - restore stock (qte_sortie reversal) for previously delivered quantity — depot-aware
           if (existingItem.quantiteLivree > 0) {
-            const article = await articleRepo.findOneBy({ id: existingItem.article.id });
-            if (article) {
-              article.qte += existingItem.quantiteLivree;
-              article.qte_physique += existingItem.quantiteLivree;
-              await articleRepo.save(article);
+            const currentDepot = (req.body.depot_id
+              ? await depotRepo.findOneBy({ id: parseInt(req.body.depot_id) })
+              : bon.depot) || null;
+
+            if (currentDepot) {
+              await updateDepotStock(queryRunner.manager, existingItem.article.id, currentDepot.id, existingItem.quantiteLivree);
+            } else {
+              const article = await articleRepo.findOneBy({ id: existingItem.article.id });
+              if (article) {
+                article.qte += existingItem.quantiteLivree;
+                article.qte_physique += existingItem.quantiteLivree;
+                await articleRepo.save(article);
+              }
             }
           }
           // Remove the article from bon
@@ -435,11 +466,20 @@ exports.updateBonCommandeClient = async (req, res) => {
           const deliveryDiff = newQuantiteLivree - existingItem.quantiteLivree;
 
           if (deliveryDiff !== 0) {
-            const article = await articleRepo.findOneBy({ id: existingItem.article.id });
-            if (article) {
-              article.qte -= deliveryDiff;
-              article.qte_physique -= deliveryDiff;
-              await articleRepo.save(article);
+            // ✅ Depot-aware: adjust stock_depot for the delivery difference (qte_sortie)
+            const currentDepot = (req.body.depot_id
+              ? await depotRepo.findOneBy({ id: parseInt(req.body.depot_id) })
+              : bon.depot) || null;
+
+            if (currentDepot) {
+              await updateDepotStock(queryRunner.manager, existingItem.article.id, currentDepot.id, -deliveryDiff);
+            } else {
+              const article = await articleRepo.findOneBy({ id: existingItem.article.id });
+              if (article) {
+                article.qte -= deliveryDiff;
+                article.qte_physique -= deliveryDiff;
+                await articleRepo.save(article);
+              }
             }
           }
 
@@ -469,7 +509,7 @@ exports.updateBonCommandeClient = async (req, res) => {
 
       // Add new articles
       for (const newItem of req.body.articles) {
-        const existingItem = existingArticles.find(item => 
+        const existingItem = existingArticles.find(item =>
           parseInt(newItem.article_id) === item.article.id
         );
 
@@ -498,11 +538,19 @@ exports.updateBonCommandeClient = async (req, res) => {
 
           const quantiteLivree = parseInt(newItem.quantiteLivree) || 0;
 
-          // Reduce stock for new delivered quantities
+          // ✅ Reduce stock (qte_sortie) for new articles — depot-aware
           if (quantiteLivree > 0) {
-            article.qte -= quantiteLivree;
-            article.qte_physique -= quantiteLivree;
-            await articleRepo.save(article);
+            const currentDepot = (req.body.depot_id
+              ? await depotRepo.findOneBy({ id: parseInt(req.body.depot_id) })
+              : bon.depot) || null;
+
+            if (currentDepot) {
+              await updateDepotStock(queryRunner.manager, article.id, currentDepot.id, -quantiteLivree);
+            } else {
+              article.qte -= quantiteLivree;
+              article.qte_physique -= quantiteLivree;
+              await articleRepo.save(article);
+            }
           }
 
           const bonArticle = bonArticleRepo.create({
@@ -549,20 +597,23 @@ exports.updateBonCommandeClient = async (req, res) => {
 };
 
 exports.deleteBonCommandeClient = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
-    const bonArticleRepo = AppDataSource.getRepository(
-      BonCommandeClientArticle
-    );
-    const bonRepo = AppDataSource.getRepository(BonCommandeClient);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const bonLivRepo = AppDataSource.getRepository(BonLivraison);
+    const bonArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+    const bonRepo = queryRunner.manager.getRepository(BonCommandeClient);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const bonLivRepo = queryRunner.manager.getRepository(BonLivraison);
 
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["articles", "articles.article"],
+      relations: ["articles", "articles.article", "depot"],
     });
 
     if (!bon) {
+      await queryRunner.rollbackTransaction();
       return res
         .status(404)
         .json({ message: "Bon de commande client non trouvé" });
@@ -574,19 +625,26 @@ exports.deleteBonCommandeClient = async (req, res) => {
     });
 
     if (linkedBLs.length > 0) {
+      await queryRunner.rollbackTransaction();
       return res.status(400).json({
         message:
           "Impossible de supprimer un bon de commande lié à des bons de livraison.",
       });
     }
 
-    // ✅ RULE: Restore stock for delivered quantities
+    // ✅ RULE: Restore stock (qte_sortie reversal) for directly-delivered quantities — depot-aware
     for (const item of bon.articles) {
       if (item.quantiteLivree > 0) {
-        const article = item.article;
-        article.qte += item.quantiteLivree;
-        article.qte_physique += item.quantiteLivree;
-        await articleRepo.save(article);
+        if (bon.depot) {
+          await updateDepotStock(queryRunner.manager, item.article.id, bon.depot.id, item.quantiteLivree);
+        } else {
+          const article = await articleRepo.findOneBy({ id: item.article.id });
+          if (article) {
+            article.qte += item.quantiteLivree;
+            article.qte_physique += item.quantiteLivree;
+            await articleRepo.save(article);
+          }
+        }
       }
     }
 
@@ -598,6 +656,8 @@ exports.deleteBonCommandeClient = async (req, res) => {
     // Then delete the bon de commande
     await bonRepo.delete(req.params.id);
 
+    await queryRunner.commitTransaction();
+
     res
       .status(200)
       .json({
@@ -605,8 +665,11 @@ exports.deleteBonCommandeClient = async (req, res) => {
           "Bon de commande client supprimé avec succès et stock restauré si applicable",
       });
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 
@@ -734,9 +797,9 @@ exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
     if (!vendeur)
       return res.status(404).json({ message: "Vendeur non trouv�" });
 
-      const hasPayments = req.body.paymentMethods && req.body.paymentMethods.length > 0;
-const montantPaye = hasPayments ? parseFloat(req.body.totalPaymentAmount || 0) : 0;
-const resteAPayer = parseFloat(req.body.totalTTC || 0) - montantPaye;
+    const hasPayments = req.body.paymentMethods && req.body.paymentMethods.length > 0;
+    const montantPaye = hasPayments ? parseFloat(req.body.totalPaymentAmount || 0) : 0;
+    const resteAPayer = parseFloat(req.body.totalTTC || 0) - montantPaye;
 
     const bonCommande = {
       numeroCommande,
@@ -788,7 +851,7 @@ const resteAPayer = parseFloat(req.body.totalTTC || 0) - montantPaye;
         prixUnitaire,
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
-          designation: item.designation || article.designation || "", // ADD THIS LINE
+        designation: item.designation || article.designation || "", // ADD THIS LINE
 
       };
 

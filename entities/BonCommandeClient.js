@@ -58,6 +58,7 @@ const BonCommandeClient = new EntitySchema({
       default: "percentage",
     },
     notes: { type: "text", nullable: true },
+    depot_id: { type: "int", nullable: true },
     createdAt: { type: "timestamp", createDate: true },
     updatedAt: { type: "timestamp", updateDate: true },
   },
@@ -79,6 +80,13 @@ const BonCommandeClient = new EntitySchema({
       target: "Vendeur",
       eager: true,
       joinColumn: { name: "vendeur_id" },
+    },
+    depot: {
+      type: "many-to-one",
+      target: "Depot",
+      eager: true,
+      nullable: true,
+      joinColumn: { name: "depot_id" },
     },
     articles: {
       type: "one-to-many",

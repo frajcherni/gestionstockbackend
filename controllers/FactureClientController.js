@@ -5,7 +5,10 @@ const { Client } = require("../entities/Client");
 const { Article } = require("../entities/Article");
 const { Vendeur } = require("../entities/Vendeur");
 const { BonLivraison } = require("../entities/BonLivraison");
-const { BonCommandeClient } = require("../entities/BonCommandeClient");
+const {
+  BonCommandeClient,
+  BonCommandeClientArticle,
+} = require("../entities/BonCommandeClient");
 const { VenteComptoire } = require("../entities/VenteComptoire");
 const { EncaissementClient } = require("../entities/EncaissementClient");
 
@@ -335,6 +338,10 @@ exports.getFactureClientById = async (req, res) => {
 };
 
 exports.createFactureClient = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
     const {
       numeroFacture,
@@ -368,17 +375,19 @@ exports.createFactureClient = async (req, res) => {
       hasRetenue = false,
     } = req.body;
     console.log(exoneration)
-    const clientRepo = AppDataSource.getRepository(Client);
-    const vendeurRepo = AppDataSource.getRepository(Vendeur);
-    const depotRepo = AppDataSource.getRepository(Depot);
-    const bonLivraisonRepo = AppDataSource.getRepository(BonLivraison);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const factureRepo = AppDataSource.getRepository(FactureClient);
-    const bonCommandeClientRepo = AppDataSource.getRepository(BonCommandeClient);
-    const venteComptoireRepo = AppDataSource.getRepository(VenteComptoire); // ADD THIS: Import your VenteComptoire repository
+    const clientRepo = queryRunner.manager.getRepository(Client);
+    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
+    const bonLivraisonRepo = queryRunner.manager.getRepository(BonLivraison);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const factureRepo = queryRunner.manager.getRepository(FactureClient);
+    const bonCommandeClientRepo = queryRunner.manager.getRepository(BonCommandeClient);
+    const bcArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+    const venteComptoireRepo = queryRunner.manager.getRepository(VenteComptoire);
 
     // Validate required fields
     if (!numeroFacture || !dateFacture || !client_id) {
+      await queryRunner.rollbackTransaction();
       return res
         .status(400)
         .json({ message: "Les champs obligatoires sont manquants" });
@@ -392,6 +401,7 @@ exports.createFactureClient = async (req, res) => {
       where: { numeroFacture },
     });
     if (existingFacture) {
+      await queryRunner.rollbackTransaction();
       return res
         .status(400)
         .json({ message: "Numéro de facture déjà utilisé" });
@@ -399,16 +409,19 @@ exports.createFactureClient = async (req, res) => {
 
     const client = await clientRepo.findOneBy({ id: parseInt(client_id) });
     if (!client) {
+      await queryRunner.rollbackTransaction();
       return res.status(404).json({ message: "Client non trouvé" });
     }
 
     // Check if bonCommandeClient exists
     let bonCommandeClient = null;
     if (boncommandeclientid) {
-      bonCommandeClient = await bonCommandeClientRepo.findOneBy({
-        id: parseInt(boncommandeclientid),
+      bonCommandeClient = await bonCommandeClientRepo.findOne({
+        where: { id: parseInt(boncommandeclientid) },
+        relations: ["articles", "articles.article"],
       });
       if (!bonCommandeClient) {
+        await queryRunner.rollbackTransaction();
         return res
           .status(404)
           .json({ message: "Bon de commande client non trouvé" });
@@ -422,6 +435,7 @@ exports.createFactureClient = async (req, res) => {
         id: parseInt(venteComptoire_id),
       });
       if (!venteComptoire) {
+        await queryRunner.rollbackTransaction();
         return res
           .status(404)
           .json({ message: "Vente comptoire non trouvée" });
@@ -432,6 +446,7 @@ exports.createFactureClient = async (req, res) => {
     if (vendeur_id) {
       vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
       if (!vendeur) {
+        await queryRunner.rollbackTransaction();
         return res.status(404).json({ message: "Vendeur non trouvé" });
       }
     }
@@ -442,6 +457,7 @@ exports.createFactureClient = async (req, res) => {
         id: parseInt(bonLivraison_id),
       });
       if (!bonLivraison) {
+        await queryRunner.rollbackTransaction();
         return res.status(404).json({ message: "Bon de livraison non trouvé" });
       }
     }
@@ -488,6 +504,7 @@ exports.createFactureClient = async (req, res) => {
     console.log("Creating facture:", facture);
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
+      await queryRunner.rollbackTransaction();
       return res.status(400).json({ message: "Les articles sont requis" });
     }
 
@@ -502,6 +519,7 @@ exports.createFactureClient = async (req, res) => {
       }
 
       if (!item.quantite || !item.prix_unitaire) {
+        await queryRunner.rollbackTransaction();
         return res.status(400).json({
           message:
             "Quantité et prix unitaire sont obligatoires pour chaque article",
@@ -527,26 +545,57 @@ exports.createFactureClient = async (req, res) => {
       };
       facture.articles.push(factureArticle);
 
-      // REDUCE STOCK ONLY IF DIRECT FACTURE (not from BL or Vente which already move stock)
-      // Actually, user wants to reduce stock from selected depot.
-      // If it's from VenteComptoire or BonLivraison, we assume they already handled it.
+      // STOCK REDUCTION LOGIC
       if (!bonLivraison_id && !venteComptoire_id && facture.depot) {
-        await updateDepotStock(AppDataSource.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+        if (bonCommandeClient) {
+          // Case: Facture from existing Bon de Commande
+          // Rule: Reduce only what remains (Invoiced Qty - Already Delivered Qty on BC)
+          const bcArticle = bonCommandeClient.articles.find(
+            (ba) => ba.article.id === articleEntity.id
+          );
+
+          if (bcArticle) {
+            const invoicedQty = parseInt(item.quantite);
+            const alreadyDelivered = bcArticle.quantiteLivree || 0;
+            const toReduce = Math.max(0, invoicedQty - alreadyDelivered);
+
+            if (toReduce > 0) {
+              await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -toReduce);
+            }
+
+            // Update BC's delivered quantity to reflect this invoice
+            bcArticle.quantiteLivree = invoicedQty;
+            await bcArticleRepo.save(bcArticle);
+          } else {
+            // Article not in original BC? Treat as direct
+            await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+          }
+        } else {
+          // Direct Facture (no BC, no BL, no VC)
+          await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+        }
       }
     }
 
-    const result = await factureRepo.save(facture);
+    const result = await queryRunner.manager.save(FactureClient, facture);
+    await queryRunner.commitTransaction();
     res.status(201).json(result);
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error("Error creating facture:", err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 
 exports.updateFactureClient = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
     const { id } = req.params;
-
     const {
       numeroFacture,
       dateFacture,
@@ -567,184 +616,232 @@ exports.updateFactureClient = async (req, res) => {
       exoneration,
       timbreFiscal,
       articles,
-      paymentMethods, // ADDED: paymentMethods field
+      paymentMethods,
     } = req.body;
 
-    const factureRepo = AppDataSource.getRepository(FactureClient);
-    const clientRepo = AppDataSource.getRepository(Client);
-    const vendeurRepo = AppDataSource.getRepository(Vendeur);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const depotRepo = AppDataSource.getRepository(Depot);
+    const factureRepo = queryRunner.manager.getRepository(FactureClient);
+    const clientRepo = queryRunner.manager.getRepository(Client);
+    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
+    const bcArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
 
-    // Vérifier si la facture existe
     const facture = await factureRepo.findOne({
       where: { id: parseInt(id) },
-      relations: ["articles", "articles.article", "client", "vendeur", "depot", "venteComptoire", "bonLivraison"],
+      relations: ["articles", "articles.article", "client", "vendeur", "depot", "venteComptoire", "bonLivraison", "bonCommandeClient", "bonCommandeClient.articles", "bonCommandeClient.articles.article"],
     });
 
     if (!facture) {
+      await queryRunner.rollbackTransaction();
       return res.status(404).json({ message: "Facture introuvable" });
     }
 
-    // Mettre à jour les champs principaux
-    facture.numeroFacture = numeroFacture;
-    facture.dateFacture = dateFacture;
-    facture.dateEcheance = dateEcheance;
-    facture.modeReglement = modeReglement;
-    facture.montantPaye = montantPaye;
-    facture.notes = notes;
-    facture.remise = remise;
-    facture.remiseType = remiseType;
-    facture.status = status;
-    facture.exoneration = !!exoneration;
-    facture.taxMode = taxMode;
-    facture.totalHT = totalHT;
-    facture.totalTTC = totalTTC;
-    facture.totalTVA = totalTVA;
-    facture.paymentMethods = paymentMethods; // ADDED: Update paymentMethods field
-
-    // Client
-    if (client_id) {
-      const client = await clientRepo.findOneBy({ id: parseInt(client_id) });
-      if (!client) {
-        return res.status(404).json({ message: "Client non trouvé" });
-      }
-      facture.client = client;
-    }
-
-    // Vendeur
-    if (vendeur_id) {
-      const vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
-      if (!vendeur) {
-        return res.status(404).json({ message: "Vendeur non trouvé" });
-      }
-      facture.vendeur = vendeur;
-    }
-
-    // Depot
-    if (depot_id) {
-      const depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
-      if (!depot) {
-        return res.status(404).json({ message: "Depot non trouvé" });
-      }
-      facture.depot = depot;
-    }
-
-    // RESTORE OLD STOCK IF DIRECT FACTURE
+    // 1. RESTORE OLD STOCK AND BC STATE
     if (!facture.venteComptoire && !facture.bonLivraison && facture.depot && facture.articles) {
       for (const oldItem of facture.articles) {
         if (oldItem.article) {
-          await updateDepotStock(AppDataSource.manager, oldItem.article.id, facture.depot.id, parseInt(oldItem.quantite));
+          await updateDepotStock(queryRunner.manager, oldItem.article.id, facture.depot.id, parseInt(oldItem.quantite));
+          
+          if (facture.bonCommandeClient) {
+            const bcArticle = facture.bonCommandeClient.articles.find(ba => ba.article.id === oldItem.article.id);
+            if (bcArticle) {
+              bcArticle.quantiteLivree = Math.max(0, (bcArticle.quantiteLivree || 0) - oldItem.quantite);
+              await bcArticleRepo.save(bcArticle);
+            }
+          }
         }
       }
     }
 
-    // Articles
+    // 2. APPLY NEW VALUES
+    facture.numeroFacture = numeroFacture;
+    facture.dateFacture = new Date(dateFacture);
+    facture.dateEcheance = dateEcheance ? new Date(dateEcheance) : null;
+    facture.modeReglement = modeReglement;
+    facture.montantPaye = parseFloat(montantPaye || 0);
+    facture.notes = notes;
+    facture.remise = parseFloat(remise || 0);
+    facture.remiseType = remiseType || "percentage";
+    facture.status = status;
+    facture.exoneration = !!exoneration;
+    facture.timbreFiscal = !!timbreFiscal;
+    facture.taxMode = taxMode;
+    facture.totalHT = parseFloat(totalHT || 0);
+    facture.totalTTC = parseFloat(totalTTC || 0);
+    facture.totalTVA = parseFloat(totalTVA || 0);
+    facture.paymentMethods = paymentMethods;
+
+    if (client_id) {
+      facture.client = await clientRepo.findOneBy({ id: parseInt(client_id) });
+    }
+    if (vendeur_id) {
+      facture.vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
+    }
+    if (depot_id) {
+      facture.depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
+    }
+
+    // 3. APPLY NEW ARTICLES AND NEW STOCK REDUCTION
     if (articles && Array.isArray(articles)) {
-      console.log(articles);
       const newArticles = [];
       for (const item of articles) {
-        const articleEntity = await articleRepo.findOneBy({
-          id: parseInt(item.article_id),
-        });
+        const articleEntity = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
         if (!articleEntity) {
-          return res
-            .status(404)
-            .json({ message: `Article ${item.article_id} non trouvé` });
+          await queryRunner.rollbackTransaction();
+          return res.status(404).json({ message: `Article ${item.article_id} non trouvé` });
         }
 
         const prixUnitaire = parseFloat(item.prix_unitaire);
         const tvaRate = item.tva ? parseFloat(item.tva) : 0;
-
-        // Calculate prix_ttc based on prix_unitaire and TVA
-        // ✅ FIX: Use prix_ttc sent from frontend instead of calculating it
-        const prix_ttc =
-          parseFloat(item.prix_ttc) ||
-          (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
+        const prix_ttc = parseFloat(item.prix_ttc) || (tvaRate > 0 ? prixUnitaire * (1 + tvaRate / 100) : prixUnitaire);
 
         const factureArticle = {
           article: articleEntity,
           quantite: parseInt(item.quantite),
           prixUnitaire: prixUnitaire,
           prix_ttc: +prix_ttc.toFixed(3),
-          designation: item.designation || articleEntity.designation || '', // Changed article to articleEntity
-          // Use the TTC value from frontend
+          designation: item.designation || articleEntity.designation || '',
           tva: tvaRate,
           remise: item.remise ? parseFloat(item.remise) : 0,
         };
-
-        console.log(factureArticle);
         newArticles.push(factureArticle);
 
-        // REDUCE NEW STOCK IF DIRECT FACTURE
+        // REDUCE STOCK FOR NEW STATE
         if (!facture.venteComptoire && !facture.bonLivraison && facture.depot) {
-          await updateDepotStock(AppDataSource.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+          if (facture.bonCommandeClient) {
+            const bcArticle = facture.bonCommandeClient.articles.find(ba => ba.article.id === articleEntity.id);
+            if (bcArticle) {
+              const invoicedQty = parseInt(item.quantite);
+              const alreadyDelivered = bcArticle.quantiteLivree || 0;
+              const toReduce = Math.max(0, invoicedQty - alreadyDelivered);
+              
+              if (toReduce > 0) {
+                await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -toReduce);
+              }
+              bcArticle.quantiteLivree = (bcArticle.quantiteLivree || 0) + invoicedQty;
+              await bcArticleRepo.save(bcArticle);
+            } else {
+              await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+            }
+          } else {
+            await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+          }
         }
       }
-
-      // Remplace les anciens articles → grâce à cascade + onDelete: "CASCADE"
       facture.articles = newArticles;
     }
 
-    // Sauvegarde
-    const updatedFacture = await factureRepo.save(facture);
-
+    const updatedFacture = await queryRunner.manager.save(FactureClient, facture);
+    await queryRunner.commitTransaction();
     return res.json(updatedFacture);
   } catch (error) {
-    console.error("Erreur lors de la mise à jour de la facture :", error);
-    return res
-      .status(500)
-      .json({ message: "Erreur lors de la mise à jour de la facture" });
+    await queryRunner.rollbackTransaction();
+    console.error("Error updating facture:", error);
+    return res.status(500).json({ message: "Erreur lors de la mise à jour" });
+  } finally {
+    await queryRunner.release();
   }
 };
 
 exports.deleteFactureClient = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
-    const factureArticleRepo =
-      AppDataSource.getRepository(FactureClientArticle);
-    const factureRepo = AppDataSource.getRepository(FactureClient);
+    const factureRepo = queryRunner.manager.getRepository(FactureClient);
+    const bcArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
 
-    await factureArticleRepo.delete({
-      factureClient: { id: parseInt(req.params.id) },
+    const facture = await factureRepo.findOne({
+      where: { id: parseInt(req.params.id) },
+      relations: ["articles", "articles.article", "depot", "bonCommandeClient", "bonCommandeClient.articles", "bonCommandeClient.articles.article", "venteComptoire", "bonLivraison"],
     });
-    const result = await factureRepo.delete(req.params.id);
 
-    if (result.affected === 0) {
-      return res.status(404).json({ message: "Facture client non trouvée" });
+    if (!facture) {
+      await queryRunner.rollbackTransaction();
+      return res.status(404).json({ message: "Facture non trouvée" });
     }
 
-    res.status(200).json({ message: "Facture client supprimée avec succès" });
+    // RESTORE STOCK AND BC STATE
+    if (!facture.venteComptoire && !facture.bonLivraison && facture.depot && facture.articles) {
+      for (const item of facture.articles) {
+        if (item.article) {
+          await updateDepotStock(queryRunner.manager, item.article.id, facture.depot.id, parseInt(item.quantite));
+          
+          if (facture.bonCommandeClient) {
+            const bcArticle = facture.bonCommandeClient.articles.find(ba => ba.article.id === item.article.id);
+            if (bcArticle) {
+              bcArticle.quantiteLivree = Math.max(0, (bcArticle.quantiteLivree || 0) - item.quantite);
+              await bcArticleRepo.save(bcArticle);
+            }
+          }
+        }
+      }
+    }
+
+    await queryRunner.manager.remove(FactureClient, facture);
+    await queryRunner.commitTransaction();
+    res.status(200).json({ message: "Facture supprimée avec succès" });
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur", error: err.message });
+    res.status(500).json({ message: "Erreur serveur" });
+  } finally {
+    await queryRunner.release();
   }
 };
 
 exports.annulerFactureClient = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
-    const repo = AppDataSource.getRepository(FactureClient);
-    const facture = await repo.findOne({
+    const factureRepo = queryRunner.manager.getRepository(FactureClient);
+    const bcArticleRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+
+    const facture = await factureRepo.findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["articles", "articles.article"],
+      relations: ["articles", "articles.article", "depot", "bonCommandeClient", "bonCommandeClient.articles", "bonCommandeClient.articles.article", "venteComptoire", "bonLivraison"],
     });
 
     if (!facture) {
+      await queryRunner.rollbackTransaction();
       return res.status(404).json({ message: "Facture client non trouvée" });
     }
 
     if (facture.status === "Annulee") {
-      return res
-        .status(400)
-        .json({ message: "Cette facture est déjà annulée" });
+      await queryRunner.rollbackTransaction();
+      return res.status(400).json({ message: "Déjà annulée" });
+    }
+
+    // RESTORE STOCK AND BC STATE
+    if (!facture.venteComptoire && !facture.bonLivraison && facture.depot && facture.articles) {
+      for (const item of facture.articles) {
+        if (item.article) {
+          await updateDepotStock(queryRunner.manager, item.article.id, facture.depot.id, parseInt(item.quantite));
+          
+          if (facture.bonCommandeClient) {
+            const bcArticle = facture.bonCommandeClient.articles.find(ba => ba.article.id === item.article.id);
+            if (bcArticle) {
+              bcArticle.quantiteLivree = Math.max(0, (bcArticle.quantiteLivree || 0) - item.quantite);
+              await bcArticleRepo.save(bcArticle);
+            }
+          }
+        }
+      }
     }
 
     facture.status = "Annulee";
-    await repo.save(facture);
-
-    res.status(200).json({ message: "Facture client annulée avec succès" });
+    await queryRunner.manager.save(FactureClient, facture);
+    await queryRunner.commitTransaction();
+    res.status(200).json({ message: "Facture annulée" });
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error(err);
-    res.status(500).json({ message: "Erreur serveur", error: err.message });
+    res.status(500).json({ message: "Erreur serveur" });
+  } finally {
+    await queryRunner.release();
   }
 };
 
