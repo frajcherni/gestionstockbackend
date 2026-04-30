@@ -36,6 +36,16 @@ const Article = new EntitySchema({
             default: true,
             nullable: false
         },
+        createdAt: {
+            name: "created_at",
+            type: "timestamp",
+            createDate: true,
+        },
+        updatedAt: {
+            name: "updated_at",
+            type: "timestamp",
+            updateDate: true,
+        },
     },
     relations: {
         categorie: {

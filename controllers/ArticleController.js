@@ -608,38 +608,49 @@ exports.searchArticles = async (req, res) => {
     limitNumber = Math.min(limitNumber, 100);
     const offset = (pageNumber - 1) * limitNumber;
 
+
     const repo = AppDataSource.getRepository(Article);
+
     const depotId = req.body.depot_id;
 
-    // --- Build query with active filter ---
+    // --- Build query ---
+    // Using leftJoinAndSelect to include full objects for categorie, fournisseur, etc.
+    // This is an ADDITION to the previous version which only selected specific fields.
     const qb = repo.createQueryBuilder("article")
-      .select([
-        "article.id",
-        "article.reference",
-        "article.designation",
-        "article.pua_ht",
-        "article.pua_ttc",
-        "article.puv_ht",
-        "article.puv_ttc",
-        "article.tva",
-        "article.active",
-        "article.image",
-      ]);
+      .leftJoinAndSelect("article.categorie", "categorie")
+      .leftJoinAndSelect("article.fournisseur", "fournisseur")
+      .leftJoinAndSelect("article.sousCategorie", "sousCategorie");
 
+    // Handle depot-specific stock if depot_id is provided
     if (depotId) {
       qb.leftJoin("article.stocks", "stock", "stock.depot_id = :depotId", { depotId: parseInt(depotId) })
         .addSelect("stock.qte", "article_qte_depot");
-    } else {
-      qb.addSelect("article.qte");
     }
 
     // Always filter active articles first
     qb.where("article.active = :active", { active: true });
 
-    // Add search condition if query exists
+    // Add type filter (Consigné/Non Consigné) - NEW
+    if (req.body.type && req.body.type !== "All") {
+      qb.andWhere("article.type = :type", { type: req.body.type });
+    }
+
+    // Add date range filter - NEW
+    if (req.body.startDate && req.body.endDate) {
+      qb.andWhere("article.createdAt BETWEEN :start AND :end", {
+        start: req.body.startDate,
+        end: req.body.endDate
+      });
+    } else if (req.body.startDate) {
+      qb.andWhere("article.createdAt >= :start", { start: req.body.startDate });
+    } else if (req.body.endDate) {
+      qb.andWhere("article.createdAt <= :end", { end: req.body.endDate });
+    }
+
+    // Enhanced search condition (Reference, Designation, Nom, Category, Supplier)
     if (q !== "") {
       qb.andWhere(
-        "(article.reference ILIKE :term OR article.designation ILIKE :term)",
+        "(article.reference ILIKE :term OR article.designation ILIKE :term OR article.nom ILIKE :term OR categorie.nom ILIKE :term OR fournisseur.raison_sociale ILIKE :term)",
         { term: `%${q}%` }
       );
     }
@@ -647,22 +658,33 @@ exports.searchArticles = async (req, res) => {
     // --- Get total matching count ---
     const total = await qb.clone().getCount();
 
-    // --- Apply pagination safely ---
+    // --- Apply sorting and pagination ---
+    // Default to Designation ASC (old behavior) unless otherwise specified
+    const sortBy = req.body.sortBy || "article.designation";
+    const sortOrder = req.body.sortOrder || "ASC";
+
     const { entities, raw } = await qb
-      .orderBy("article.designation", "ASC")
+      .orderBy(sortBy, sortOrder)
       .offset(offset)
       .limit(limitNumber)
       .getRawAndEntities();
 
-    // --- Add full image URL and Map depot stock ---
+    // --- Post-processing ---
     const articlesWithUrls = entities.map((a, index) => {
       const result = {
         ...a,
-        image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null
+        // Ensure image URLs are full URLs
+        image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null,
+        website_images: (a.website_images || []).map(img => 
+          `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+        )
       };
-      if (depotId) {
+
+      // If depot_id was provided, overwrite 'qte' with the depot-specific quantity
+      if (depotId && raw[index].article_qte_depot !== undefined) {
         result.qte = parseInt(raw[index].article_qte_depot) || 0;
       }
+      
       return result;
     });
 
