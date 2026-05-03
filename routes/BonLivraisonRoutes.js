@@ -8,6 +8,7 @@ router.post('/addbonlivraison', controller.createBonLivraison);
 router.get('/getNextLivraisonNumber', controller.getNextLivraisonNumber);
 
 router.get('/getbonlivraison', controller.getAllBonLivraisons);
+router.get('/paginated', controller.getBonLivraisonPaginated);
 router.put('/:id', controller.updateBonLivraison);
 router.delete('/:id', controller.deleteBonLivraison);
 

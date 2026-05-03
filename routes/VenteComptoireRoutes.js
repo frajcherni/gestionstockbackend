@@ -4,6 +4,7 @@ const VenteComptoireController = require('../controllers/VenteComptoireControlle
 
 router.post('/addVenteComptoire', VenteComptoireController.createVenteComptoire);
 router.get('/getAllVenteComptoire', VenteComptoireController.getAllVenteComptoire);
+router.get('/paginated', VenteComptoireController.getVenteComptoirePaginated);
 router.put('/updateventecomptoire/:id', VenteComptoireController.updateVenteComptoire);
 router.delete('/deleteventecomptoire/:id', VenteComptoireController.deleteVenteComptoire);
 router.get('/fetchNextVenteComptoireNumber', VenteComptoireController.fetchNextVenteComptoireNumber);

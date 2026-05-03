@@ -7,6 +7,7 @@ router.post("/addBonCommandeClient", DevisController.createDevisClient);
 
 // Get all client orders
 router.get("/getAllBonCommandeClient", DevisController.getAllDevisClient);
+router.get("/paginated", DevisController.getDevisPaginated);
 
 // Get a specific client order by ID
 

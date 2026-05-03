@@ -338,3 +338,82 @@ exports.annulerDevisClient = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
+
+exports.getDevisPaginated = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      startDate,
+      endDate,
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+
+    const repo = AppDataSource.getRepository(DevisClient);
+    const queryBuilder = repo
+      .createQueryBuilder("devis")
+      .leftJoinAndSelect("devis.client", "client")
+      .leftJoinAndSelect("devis.vendeur", "vendeur")
+      .leftJoinAndSelect("devis.articles", "articles")
+      .leftJoinAndSelect("articles.article", "articleDetails");
+
+    // Search filter
+    if (search) {
+      queryBuilder.andWhere(
+        "(devis.numeroCommande LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR client.telephone2 LIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+
+    // Status filter
+    if (status) {
+      queryBuilder.andWhere("devis.status = :status", { status });
+    }
+
+    // Date range filter
+    if (startDate && endDate) {
+      queryBuilder.andWhere(
+        "devis.dateCommande BETWEEN :startDate AND :endDate",
+        {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        }
+      );
+    } else if (startDate) {
+      queryBuilder.andWhere("devis.dateCommande >= :startDate", {
+        startDate: `${startDate} 00:00:00`,
+      });
+    } else if (endDate) {
+      queryBuilder.andWhere("devis.dateCommande <= :endDate", {
+        endDate: `${endDate} 23:59:59`,
+      });
+    }
+
+    // Sorting
+    queryBuilder.orderBy("devis.dateCommande", "DESC");
+    queryBuilder.addOrderBy("devis.id", "DESC");
+
+    // Pagination
+    const [devis, totalCount] = await queryBuilder
+      .skip(skip)
+      .take(take)
+      .getManyAndCount();
+
+    res.json({
+      devis,
+      pagination: {
+        totalCount,
+        page: parseInt(page),
+        limit: take,
+        totalPages: Math.ceil(totalCount / take),
+      },
+    });
+  } catch (err) {
+    console.error("Error in getDevisPaginated:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};

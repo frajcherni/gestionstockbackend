@@ -888,3 +888,91 @@ exports.getAllBonCommandeClient = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur" });
   }
 };
+
+exports.getBonsCommandeClientPaginated = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      startDate,
+      endDate,
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const repo = AppDataSource.getRepository(BonCommandeClient);
+
+    const queryBuilder = repo.createQueryBuilder("bon")
+      .leftJoinAndSelect("bon.client", "client")
+      .leftJoinAndSelect("bon.vendeur", "vendeur")
+      .leftJoinAndSelect("bon.depot", "depot")
+      .leftJoinAndSelect("bon.articles", "articles")
+      .leftJoinAndSelect("articles.article", "article")
+      .leftJoinAndSelect("bon.paiements", "paiements")
+      .leftJoinAndSelect("bon.clientWebsite", "clientWebsite");
+
+    // Search filter
+    if (search) {
+      queryBuilder.andWhere(
+        "(bon.numeroCommande LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR clientWebsite.nomPrenom LIKE :search OR clientWebsite.telephone LIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+
+    // Status filter
+    if (status) {
+      queryBuilder.andWhere("bon.status = :status", { status });
+    }
+
+    // Date range filter
+    if (startDate) {
+      queryBuilder.andWhere("bon.dateCommande >= :startDate", { startDate });
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      queryBuilder.andWhere("bon.dateCommande <= :endDate", { endDate: end });
+    }
+
+    queryBuilder.orderBy("bon.dateCommande", "DESC")
+      .addOrderBy("bon.id", "DESC")
+      .skip(skip)
+      .take(parseInt(limit));
+
+    const [bons, totalCount] = await queryBuilder.getManyAndCount();
+
+    // Map to include calculated totals if needed, or rely on entity fields
+    const formattedBons = bons.map(bon => {
+      // Calculate payment totals from the joined paiements if necessary
+      // This ensures we have real-time data even if montantPaye field is stale
+      const relevantPaiements = bon.paiements || [];
+      const regularPaiementsTotal = relevantPaiements
+        .filter(p => p.modePaiement !== "Retention")
+        .reduce((sum, p) => sum + parseFloat(p.montant || 0), 0);
+      
+      const retentionPaiementsTotal = relevantPaiements
+        .filter(p => p.modePaiement === "Retention")
+        .reduce((sum, p) => sum + parseFloat(p.montant || 0), 0);
+
+      return {
+        ...bon,
+        calculatedMontantPaye: regularPaiementsTotal,
+        calculatedMontantRetenue: retentionPaiementsTotal
+      };
+    });
+
+    res.json({
+      bons: formattedBons,
+      pagination: {
+        totalCount,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(totalCount / parseInt(limit)),
+      },
+    });
+  } catch (err) {
+    console.error("Pagination error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la pagination" });
+  }
+};

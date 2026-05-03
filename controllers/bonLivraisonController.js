@@ -943,3 +943,86 @@ exports.getBonLivraisonById = async (req, res) => {
     res.status(500).json({ message: "Erreur serveur", error: err.message });
   }
 };
+
+exports.getBonLivraisonPaginated = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      startDate,
+      endDate,
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+
+    const repo = AppDataSource.getRepository(BonLivraison);
+    const queryBuilder = repo
+      .createQueryBuilder("bon")
+      .leftJoinAndSelect("bon.client", "client")
+      .leftJoinAndSelect("bon.vendeur", "vendeur")
+      .leftJoinAndSelect("bon.depot", "depot")
+      .leftJoinAndSelect("bon.articles", "articles")
+      .leftJoinAndSelect("articles.article", "articleDetails")
+      .leftJoinAndSelect("bon.bonCommandeClient", "bonCommandeClient")
+      .leftJoinAndSelect("bon.paiements", "paiements")
+      .leftJoinAndSelect("bon.factures", "factures");
+
+    // Search filter
+    if (search) {
+      queryBuilder.andWhere(
+        "(bon.numeroLivraison LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR client.telephone2 LIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+
+    // Status filter
+    if (status) {
+      queryBuilder.andWhere("bon.status = :status", { status });
+    }
+
+    // Date range filter
+    if (startDate && endDate) {
+      queryBuilder.andWhere(
+        "bon.dateLivraison BETWEEN :startDate AND :endDate",
+        {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        }
+      );
+    } else if (startDate) {
+      queryBuilder.andWhere("bon.dateLivraison >= :startDate", {
+        startDate: `${startDate} 00:00:00`,
+      });
+    } else if (endDate) {
+      queryBuilder.andWhere("bon.dateLivraison <= :endDate", {
+        endDate: `${endDate} 23:59:59`,
+      });
+    }
+
+    // Sorting
+    queryBuilder.orderBy("bon.dateLivraison", "DESC");
+    queryBuilder.addOrderBy("bon.id", "DESC");
+
+    // Pagination
+    const [bons, totalCount] = await queryBuilder
+      .skip(skip)
+      .take(take)
+      .getManyAndCount();
+
+    res.json({
+      bons,
+      pagination: {
+        totalCount,
+        page: parseInt(page),
+        limit: take,
+        totalPages: Math.ceil(totalCount / take),
+      },
+    });
+  } catch (err) {
+    console.error("Error in getBonLivraisonPaginated:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};

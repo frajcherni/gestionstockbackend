@@ -18,6 +18,11 @@ router.get(
   bonCommandeClientController.getAllBonCommandeClient
 );
 
+router.get(
+  "/paginated",
+  bonCommandeClientController.getBonsCommandeClientPaginated
+);
+
 router.put("/:id", bonCommandeClientController.updateBonCommandeClient);
 
 // Delete a client order

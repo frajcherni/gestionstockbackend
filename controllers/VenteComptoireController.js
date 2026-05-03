@@ -626,3 +626,114 @@ exports.fetchNextVenteComptoireNumber = async (req, res) => {
     });
   }
 };
+
+exports.getVenteComptoirePaginated = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      search = "",
+      status = "",
+      startDate,
+      endDate,
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+
+    const repo = AppDataSource.getRepository(VenteComptoire);
+    const queryBuilder = repo
+      .createQueryBuilder("vente")
+      .leftJoinAndSelect("vente.client", "client")
+      .leftJoinAndSelect("vente.vendeur", "vendeur")
+      .leftJoinAndSelect("vente.depot", "depot")
+      .leftJoinAndSelect("vente.articles", "articles")
+      .leftJoinAndSelect("articles.article", "articleDetails");
+
+    // Search filter (number, client name, or phone)
+    if (search) {
+      queryBuilder.andWhere(
+        "(vente.numeroCommande LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR client.telephone2 LIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+
+    // Status filter
+    if (status) {
+      queryBuilder.andWhere("vente.status = :status", { status });
+    }
+
+    // Date range filter
+    if (startDate && endDate) {
+      queryBuilder.andWhere(
+        "vente.dateCommande BETWEEN :startDate AND :endDate",
+        {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        }
+      );
+    } else if (startDate) {
+      queryBuilder.andWhere("vente.dateCommande >= :startDate", {
+        startDate: `${startDate} 00:00:00`,
+      });
+    } else if (endDate) {
+      queryBuilder.andWhere("vente.dateCommande <= :endDate", {
+        endDate: `${endDate} 23:59:59`,
+      });
+    }
+
+    // Sorting
+    queryBuilder.orderBy("vente.dateCommande", "DESC");
+    queryBuilder.addOrderBy("vente.id", "DESC");
+
+    // Pagination
+    const [bons, totalCount] = await queryBuilder
+      .skip(skip)
+      .take(take)
+      .getManyAndCount();
+
+    // Enhance results with calculated fields
+    const enhancedBons = bons.map((vente) => {
+      let subTotal = 0;
+      let totalTax = 0;
+      let grandTotal = 0;
+
+      vente.articles.forEach((item) => {
+        const qty = item.quantite || 0;
+        const price = parseFloat(item.prixUnitaire) || 0;
+        const tvaRate = parseFloat(item.tva) || 0;
+        const remiseRate = parseFloat(item.remise) || 0;
+
+        const montantHTLigne = qty * price * (1 - remiseRate / 100);
+        const montantTTCLigne = item.prix_ttc ? qty * parseFloat(item.prix_ttc) : montantHTLigne * (1 + tvaRate / 100);
+        const taxAmount = montantTTCLigne - montantHTLigne;
+
+        subTotal += montantHTLigne;
+        totalTax += taxAmount;
+        grandTotal += montantTTCLigne;
+      });
+
+      return {
+        ...vente,
+        subTotal: subTotal.toFixed(3),
+        totalTax: totalTax.toFixed(3),
+        grandTotal: grandTotal.toFixed(3),
+        totalAfterRemise: (parseFloat(vente.totalAfterRemise) || grandTotal).toFixed(3),
+      };
+    });
+
+    res.json({
+      bons: enhancedBons,
+      pagination: {
+        totalCount,
+        page: parseInt(page),
+        limit: take,
+        totalPages: Math.ceil(totalCount / take),
+      },
+    });
+  } catch (err) {
+    console.error("Error in getVenteComptoirePaginated:", err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
