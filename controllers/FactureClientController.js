@@ -178,8 +178,10 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
       .leftJoinAndSelect("facture.vendeur", "vendeur")
       .leftJoinAndSelect("facture.depot", "depot")
       .leftJoinAndSelect("facture.bonLivraison", "bonLivraison")
+      .leftJoinAndSelect("bonLivraison.paiements", "bonLivraisonPaiements")
       .leftJoinAndSelect("facture.venteComptoire", "venteComptoire")
       .leftJoinAndSelect("facture.bonCommandeClient", "bonCommandeClient")
+      .leftJoinAndSelect("bonCommandeClient.paiements", "bonCommandePaiements")
       .leftJoinAndSelect("facture.articles", "articles")
       .leftJoinAndSelect("articles.article", "article");
 
