@@ -10,6 +10,7 @@ const {
 const router = Router();
 
 router.get('/getfournisseur', getAllFournisseurs);
+router.get('/search', require('../controllers/fournisseurController').searchFournisseurs);
 router.get('/:id', getFournisseurById);
 router.post('/addfournisseur', createFournisseur);
 router.put('/updateFournisseur/:id', updateFournisseur);

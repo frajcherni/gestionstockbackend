@@ -13,6 +13,44 @@ exports.getAllFournisseurs = async (req, res) => {
   }
 };
 
+exports.searchFournisseurs = async (req, res) => {
+  try {
+    const { query = "", page = 1, limit = 10 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const take = parseInt(limit);
+
+    const repo = AppDataSource.getRepository(Fournisseur);
+    const queryBuilder = repo.createQueryBuilder("fournisseur");
+
+    if (query) {
+      queryBuilder.andWhere(
+        "(fournisseur.raison_sociale LIKE :query OR fournisseur.designation LIKE :query)",
+        { query: `%${query}%` }
+      );
+    }
+
+    queryBuilder.orderBy("fournisseur.raison_sociale", "ASC");
+
+    const [fournisseurs, totalCount] = await queryBuilder
+      .skip(skip)
+      .take(take)
+      .getManyAndCount();
+
+    res.json({
+      fournisseurs,
+      pagination: {
+        totalCount,
+        page: parseInt(page),
+        limit: take,
+        totalPages: Math.ceil(totalCount / take),
+      },
+    });
+  } catch (error) {
+    console.error("Error searching fournisseurs:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 exports.getFournisseurById = async (req, res) => {
   try {
     const fournisseur = await AppDataSource.getRepository(Fournisseur).findOne({
