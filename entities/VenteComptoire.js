@@ -17,7 +17,8 @@ const VenteComptoire = new EntitySchema({
       enum: ["HT", "TTC"],
       default: "HT",
     },
-    remise: { type: "decimal", precision: 10, scale: 3, default: 0 },
+    remise: { type: "decimal", precision: 18, scale: 10, default: 0 },
+    lockedPercentage: { type: "decimal", precision: 18, scale: 10, nullable: true, default: null },
     totalAfterRemise: { type: "decimal", precision: 12, scale: 3, default: 0 },
     remiseType: {
       type: "enum",

@@ -41,8 +41,8 @@ const FactureClient = new EntitySchema({
     resteAPayer: { type: "decimal", precision: 12, scale: 3, default: 0 },
     remise: {
       type: "decimal",
-      precision: 12,
-      scale: 3,
+      precision: 18,
+      scale: 10,
       default: 0,
       nullable: true,
     },
@@ -72,6 +72,7 @@ const FactureClient = new EntitySchema({
       type: "text",
       nullable: true,
     },
+    lockedPercentage: { type: "decimal", precision: 18, scale: 10, nullable: true, default: null },
     remiseType: {
       type: "enum",
       enum: ["percentage", "fixed"],

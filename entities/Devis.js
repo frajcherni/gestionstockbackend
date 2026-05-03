@@ -17,7 +17,8 @@ const DevisClient = new EntitySchema({
       enum: ["HT", "TTC"],
       default: "HT",
     },
-    remise: { type: "decimal", precision: 10, scale: 3, default: 0 },
+    remise: { type: "decimal", precision: 18, scale: 10, default: 0 },
+    lockedPercentage: { type: "decimal", precision: 18, scale: 10, nullable: true, default: null },
     remiseType: {
       type: "enum",
       enum: ["percentage", "fixed"],
