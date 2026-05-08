@@ -33,48 +33,55 @@ exports.getTrésorerieData = async (req, res) => {
         const blRepo = AppDataSource.getRepository(BonLivraison);
         const paiementClientRepo = AppDataSource.getRepository(PaiementClient);
 
-        // Fetch data with proper relations
+        // Fetch data with proper relations - Expanded to include updated documents
         const [ventes, encaissements, paiementsFournisseurs, factures, bonCommandes, bonLivraisons, paiementsBC] = await Promise.all([
             venteRepo.find({
-                where: {
-                    dateCommande: Between(start, end)
-                },
+                where: [
+                    { dateCommande: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['client']
             }),
             encaissementRepo.find({
-                where: {
-                    date: Between(start, end)
-                },
+                where: [
+                    { date: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['client', 'factureClient', 'factureClient.client']
             }),
             paiementRepo.find({
-                where: {
-                    datePaiement: Between(start, end)
-                },
+                where: [
+                    { datePaiement: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['factureFournisseur']
             }),
             factureRepo.find({
-                where: {
-                    dateFacture: Between(start, end)
-                },
+                where: [
+                    { dateFacture: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['client']
             }),
             bcRepo.find({
-                where: {
-                    dateCommande: Between(start, end)
-                },
+                where: [
+                    { dateCommande: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['client']
             }),
             blRepo.find({
-                where: {
-                    dateLivraison: Between(start, end)
-                },
+                where: [
+                    { dateLivraison: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['client']
             }),
             paiementClientRepo.find({
-                where: {
-                    date: Between(start, end)
-                },
+                where: [
+                    { date: Between(start, end) },
+                    { updatedAt: Between(start, end) }
+                ],
                 relations: ['client', 'bonCommandeClient', 'bonCommandeClient.client', 'bonLivraison', 'bonLivraison.client']
             })
         ]);
@@ -128,532 +135,415 @@ exports.getTrésorerieData = async (req, res) => {
 
         // Process Facture Client direct payments
         factures.forEach(facture => {
+            const clientInfo = getClientInfo(facture.client, null);
+            
             if (facture.paymentMethods && facture.paymentMethods.length > 0) {
-                let facturePaymentTotal = 0;
-                const paymentDetails = [];
-
-                facture.paymentMethods.forEach(payment => {
+                facture.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
+                    if (amount <= 0) return;
+
                     const method = payment.method || '';
+                    const pmDateStr = payment.dateEcheance || facture.dateFacture;
+                    const pmDate = moment(pmDateStr).toDate();
 
-                    facturePaymentTotal += amount;
-
-                    if (isRetention(method)) {
-                        facturePayments.retenue += amount;
-                    } else {
-                        const methodKey = method.toLowerCase();
-                        if (facturePayments[methodKey] !== undefined) {
-                            facturePayments[methodKey] += amount;
+                    if (pmDate >= start && pmDate <= end) {
+                        if (isRetention(method)) {
+                            facturePayments.retenue += amount;
+                        } else {
+                            const methodKey = method.toLowerCase();
+                            if (facturePayments[methodKey] !== undefined) {
+                                facturePayments[methodKey] += amount;
+                            }
                         }
+
+                        totalEncaissementFacture += amount;
+                        totalPaiementsClients += amount;
+
+                        transactions.push({
+                            id: `facture_${facture.id}_pm_${idx}`,
+                            type: 'facture_direct',
+                            numero: facture.numeroFacture,
+                            date: pmDateStr,
+                            client: clientInfo.client,
+                            clientObj: clientInfo.clientObj,
+                            montant: amount,
+                            paymentMethods: [{
+                                method: payment.method,
+                                amount: payment.amount,
+                                numero: payment.numero || '',
+                                banque: payment.banque || '',
+                                dateEcheance: payment.dateEcheance || '',
+                                tauxRetention: payment.tauxRetention || 0
+                            }],
+                            source: `Facture ${facture.numeroFacture}`
+                        });
                     }
-
-                    paymentDetails.push({
-                        method: payment.method,
-                        amount: payment.amount,
-                        numero: payment.numero || '',
-                        banque: payment.banque || '',
-                        dateEcheance: payment.dateEcheance || '',
-                        tauxRetention: payment.tauxRetention || 0
-                    });
                 });
-
-                // Add regular payments to transactions
-                if (facturePaymentTotal > 0) {
-                    totalEncaissementFacture += facturePaymentTotal;
-                    totalPaiementsClients += facturePaymentTotal;
-
-                    const clientInfo = getClientInfo(facture.client, null);
-
-                    transactions.push({
-                        id: facture.id,
-                        type: 'facture_direct',
-                        numero: facture.numeroFacture,
-                        numeroFacture: facture.numeroFacture,
-                        date: facture.dateFacture,
-                        client: clientInfo.client,
-                        clientObj: clientInfo.clientObj,
-                        montant: facturePaymentTotal,
-                        paymentMethods: paymentDetails,
-                        hasRetenue: facture.hasRetenue,
-                        montantRetenue: facture.montantRetenue || 0,
-                        source: `Facture ${facture.numeroFacture}`,
-                        factureClient: facture
-                    });
-                }
             }
 
-            // Handle retenue from montantRetenue field
+            // Handle standalone retenue if document in range
             if (facture.hasRetenue && facture.montantRetenue > 0) {
-                const retenueAmount = Number(facture.montantRetenue || 0);
-                facturePayments.retenue += retenueAmount;
-
-                const clientInfo = getClientInfo(facture.client, null);
-
-                transactions.push({
-                    id: `facture_${facture.id}_retenue`,
-                    type: 'facture_direct',
-                    numero: facture.numeroFacture,
-                    numeroFacture: facture.numeroFacture,
-                    date: facture.dateFacture,
-                    client: clientInfo.client,
-                    clientObj: clientInfo.clientObj,
-                    montant: retenueAmount,
-                    paymentMethods: [{
-                        method: "Retenue",
-                        amount: retenueAmount,
-                        tauxRetention: 0
-                    }],
-                    hasRetenue: true,
-                    montantRetenue: retenueAmount,
-                    source: `Facture ${facture.numeroFacture}`,
-                    factureClient: facture
-                });
+                const docDate = moment(facture.dateFacture).toDate();
+                if (docDate >= start && docDate <= end) {
+                    const retenueAmount = Number(facture.montantRetenue || 0);
+                    facturePayments.retenue += retenueAmount;
+                    transactions.push({
+                        id: `facture_${facture.id}_retenue`,
+                        type: 'facture_direct',
+                        numero: facture.numeroFacture,
+                        date: facture.dateFacture,
+                        client: clientInfo.client,
+                        montant: retenueAmount,
+                        paymentMethods: [{ method: "Retenue", amount: retenueAmount, tauxRetention: 0 }],
+                        source: `Facture ${facture.numeroFacture}`
+                    });
+                }
             }
         });
 
         // Process encaissements
         encaissements.forEach(encaissement => {
-            let encaissementAmount = 0;
-            const paymentDetails = [];
+            const documentClient = encaissement.factureClient?.client || null;
+            const clientInfo = getClientInfo(encaissement.client, documentClient);
 
             if (encaissement.paymentMethods && encaissement.paymentMethods.length > 0) {
-                encaissement.paymentMethods.forEach(payment => {
+                encaissement.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
-                    const method = payment.method || '';
+                    if (amount <= 0) return;
 
-                    encaissementAmount += amount;
+                    const pmDateStr = payment.dateEcheance || encaissement.date;
+                    const pmDate = moment(pmDateStr).toDate();
 
-                    if (isRetention(method)) {
-                        facturePayments.retenue += amount;
-                    } else {
-                        const methodKey = method.toLowerCase();
-                        if (facturePayments[methodKey] !== undefined) {
-                            facturePayments[methodKey] += amount;
+                    if (pmDate >= start && pmDate <= end) {
+                        const method = payment.method || '';
+                        if (isRetention(method)) {
+                            facturePayments.retenue += amount;
+                        } else {
+                            const methodKey = method.toLowerCase();
+                            if (facturePayments[methodKey] !== undefined) {
+                                facturePayments[methodKey] += amount;
+                            }
                         }
-                    }
 
-                    paymentDetails.push({
-                        method: payment.method,
-                        amount: payment.amount,
-                        numero: payment.numero || '',
-                        banque: payment.banque || '',
-                        dateEcheance: payment.dateEcheance || '',
-                        tauxRetention: payment.tauxRetention || 0
-                    });
+                        totalEncaissementFacture += amount;
+                        totalPaiementsClients += amount;
+
+                        transactions.push({
+                            id: `encaissement_${encaissement.id}_pm_${idx}`,
+                            type: 'encaissement',
+                            numero: encaissement.numeroEncaissement,
+                            date: pmDateStr,
+                            client: clientInfo.client,
+                            montant: amount,
+                            paymentMethods: [payment],
+                            source: encaissement.factureClient ? `Facture ${encaissement.factureClient.numeroFacture}` : 'Direct'
+                        });
+                    }
                 });
-            } else {
-                // Legacy modePaiement field
-                if (encaissement.modePaiement) {
+            } else if (encaissement.modePaiement) {
+                // Legacy support
+                const pmDateStr = encaissement.dateEcheance || encaissement.date;
+                const pmDate = moment(pmDateStr).toDate();
+                if (pmDate >= start && pmDate <= end) {
                     const amount = Number(encaissement.montant || 0);
                     const method = encaissement.modePaiement;
-
-                    encaissementAmount += amount;
-
-                    if (isRetention(method)) {
-                        facturePayments.retenue += amount;
-                    } else {
+                    if (isRetention(method)) facturePayments.retenue += amount;
+                    else {
                         const methodKey = method.toLowerCase();
-                        if (facturePayments[methodKey] !== undefined) {
-                            facturePayments[methodKey] += amount;
-                        }
+                        if (facturePayments[methodKey] !== undefined) facturePayments[methodKey] += amount;
                     }
-
-                    paymentDetails.push({
-                        method: encaissement.modePaiement,
-                        amount: encaissement.montant,
-                        numero: encaissement.numeroCheque || encaissement.numeroTraite || '',
-                        banque: encaissement.banque || '',
-                        dateEcheance: encaissement.dateEcheance || ''
+                    totalEncaissementFacture += amount;
+                    totalPaiementsClients += amount;
+                    transactions.push({
+                        id: encaissement.id,
+                        type: 'encaissement',
+                        numero: encaissement.numeroEncaissement,
+                        date: pmDateStr,
+                        client: clientInfo.client,
+                        montant: amount,
+                        paymentMethods: [{
+                            method: encaissement.modePaiement,
+                            amount: encaissement.montant,
+                            numero: encaissement.numeroCheque || encaissement.numeroTraite || '',
+                            banque: encaissement.banque || '',
+                            dateEcheance: encaissement.dateEcheance || ''
+                        }],
+                        source: encaissement.factureClient ? `Facture ${encaissement.factureClient.numeroFacture}` : 'Direct'
                     });
                 }
-            }
-
-            // Add regular payments to transactions
-            if (encaissementAmount > 0) {
-                totalEncaissementFacture += encaissementAmount;
-                totalPaiementsClients += encaissementAmount;
-
-                const documentClient = encaissement.factureClient?.client || null;
-                const clientInfo = getClientInfo(encaissement.client, documentClient);
-
-                transactions.push({
-                    id: encaissement.id,
-                    type: 'encaissement',
-                    numero: encaissement.numeroEncaissement,
-                    numeroEncaissement: encaissement.numeroEncaissement,
-                    date: encaissement.date,
-                    client: clientInfo.client,
-                    clientObj: clientInfo.clientObj,
-                    montant: encaissementAmount,
-                    paymentMethods: paymentDetails,
-                    hasRetenue: encaissement.hasRetenue,
-                    montantRetenue: encaissement.montantRetenue || 0,
-                    source: encaissement.factureClient ? `Facture ${encaissement.factureClient.numeroFacture}` : 'Direct',
-                    factureClient: encaissement.factureClient
-                });
-            }
-
-            // Handle retenue from montantRetenue field
-            if (encaissement.hasRetenue && encaissement.montantRetenue > 0) {
-                const retenueAmount = Number(encaissement.montantRetenue || 0);
-                facturePayments.retenue += retenueAmount;
-
-                const documentClient = encaissement.factureClient?.client || null;
-                const clientInfo = getClientInfo(encaissement.client, documentClient);
-
-                transactions.push({
-                    id: `encaissement_${encaissement.id}_retenue`,
-                    type: 'encaissement',
-                    numero: encaissement.numeroEncaissement,
-                    numeroEncaissement: encaissement.numeroEncaissement,
-                    date: encaissement.date,
-                    client: clientInfo.client,
-                    clientObj: clientInfo.clientObj,
-                    montant: retenueAmount,
-                    paymentMethods: [{
-                        method: "Retenue",
-                        amount: retenueAmount,
-                        tauxRetention: encaissement.tauxRetention || 0
-                    }],
-                    hasRetenue: true,
-                    montantRetenue: retenueAmount,
-                    source: encaissement.factureClient ? `Facture ${encaissement.factureClient.numeroFacture}` : 'Direct',
-                    factureClient: encaissement.factureClient
-                });
             }
         });
 
         // Process Bon Commande Client direct payment methods
-        // Process Bon Commande Client direct payment methods
         bonCommandes.forEach(bc => {
-            let bcPaymentTotal = 0;
-            const paymentDetails = [];
-
-            // Process payment methods if they exist
+            const clientInfo = getClientInfo(bc.client, null);
             if (bc.paymentMethods && bc.paymentMethods.length > 0) {
-                bc.paymentMethods.forEach(payment => {
+                bc.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
-                    const method = payment.method || '';
+                    if (amount <= 0) return;
 
-                    bcPaymentTotal += amount;
+                    const pmDateStr = payment.dateEcheance || bc.dateCommande;
+                    const pmDate = moment(pmDateStr).toDate();
 
-                    if (isRetention(method)) {
-                        bcPayments.retenue += amount;
-                    } else {
-                        const methodKey = method.toLowerCase();
-                        if (bcPayments[methodKey] !== undefined) {
-                            bcPayments[methodKey] += amount;
+                    if (pmDate >= start && pmDate <= end) {
+                        const method = payment.method || '';
+                        if (isRetention(method)) {
+                            bcPayments.retenue += amount;
+                        } else {
+                            const methodKey = method.toLowerCase();
+                            if (bcPayments[methodKey] !== undefined) {
+                                bcPayments[methodKey] += amount;
+                            }
                         }
-                    }
 
-                    paymentDetails.push({
-                        method: payment.method,
-                        amount: payment.amount,
-                        numero: payment.numero || '',
-                        banque: payment.banque || '',
-                        dateEcheance: payment.dateEcheance || '',
-                        tauxRetention: payment.tauxRetention || 0
-                    });
+                        totalEncaissementBC += amount;
+                        totalPaiementsClients += amount;
+
+                        transactions.push({
+                            id: `bc_${bc.id}_pm_${idx}`,
+                            type: 'bon_commande',
+                            numero: bc.numeroCommande,
+                            date: pmDateStr,
+                            client: clientInfo.client,
+                            montant: amount,
+                            paymentMethods: [payment],
+                            source: `BC ${bc.numeroCommande}`
+                        });
+                    }
                 });
             }
 
-            // Handle retenue from montantRetenue field - ADD TO THE SAME TRANSACTION
+            // Handle standalone retenue if doc in range
             if (bc.hasRetenue && bc.montantRetenue > 0) {
-                const retenueAmount = Number(bc.montantRetenue || 0);
-                bcPayments.retenue += retenueAmount;
-
-                // Check if retention payment already exists
-                const existingRetention = paymentDetails.find(p =>
-                    p.method.toLowerCase() === 'retenue' || p.method.toLowerCase() === 'retention'
-                );
-
-                if (existingRetention) {
-                    // Update existing retention amount
-                    existingRetention.amount = retenueAmount;
-                    bcPaymentTotal = bcPaymentTotal - Number(existingRetention.amount || 0) + retenueAmount;
-                } else {
-                    // Add new retention payment
-                    paymentDetails.push({
-                        method: "Retenue",
-                        amount: retenueAmount,
-                        tauxRetention: 1
+                const docDate = moment(bc.dateCommande).toDate();
+                if (docDate >= start && docDate <= end) {
+                    const retenueAmount = Number(bc.montantRetenue || 0);
+                    bcPayments.retenue += retenueAmount;
+                    transactions.push({
+                        id: `bc_${bc.id}_retenue`,
+                        type: 'bon_commande',
+                        numero: bc.numeroCommande,
+                        date: bc.dateCommande,
+                        client: clientInfo.client,
+                        montant: retenueAmount,
+                        paymentMethods: [{ method: "Retenue", amount: retenueAmount, tauxRetention: 1 }],
+                        source: `BC ${bc.numeroCommande}`
                     });
-                    bcPaymentTotal += retenueAmount;
                 }
             }
-
-            // Add SINGLE transaction with ALL payment methods
-            if (bcPaymentTotal > 0 || paymentDetails.length > 0) {
-                totalEncaissementBC += bcPaymentTotal;
-                totalPaiementsClients += bcPaymentTotal;
-
-                const clientInfo = getClientInfo(bc.client, null);
-
-                transactions.push({
-                    id: bc.id,
-                    type: 'bon_commande',
-                    numero: bc.numeroCommande,
-                    date: bc.dateCommande,
-                    client: clientInfo.client,
-                    montant: bcPaymentTotal,
-                    paymentMethods: paymentDetails,
-                    source: `BC ${bc.numeroCommande}`
-                });
-            }
-
-            // REMOVE the separate retention transaction that was here!
         });
 
         // Process Bon Livraison Client direct payment methods
         bonLivraisons.forEach(bl => {
-            let blPaymentTotal = 0;
-            const paymentDetails = [];
-
+            const clientInfo = getClientInfo(bl.client, null);
             if (bl.paymentMethods && bl.paymentMethods.length > 0) {
-                bl.paymentMethods.forEach(payment => {
+                bl.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
-                    const method = payment.method || '';
+                    if (amount <= 0) return;
 
-                    blPaymentTotal += amount;
+                    const pmDateStr = payment.dateEcheance || bl.dateLivraison;
+                    const pmDate = moment(pmDateStr).toDate();
 
-                    if (isRetention(method)) {
-                        blPayments.retenue += amount;
-                    } else {
-                        const methodKey = method.toLowerCase();
-                        if (blPayments[methodKey] !== undefined) {
-                            blPayments[methodKey] += amount;
+                    if (pmDate >= start && pmDate <= end) {
+                        const method = payment.method || '';
+                        if (isRetention(method)) {
+                            blPayments.retenue += amount;
+                        } else {
+                            const methodKey = method.toLowerCase();
+                            if (blPayments[methodKey] !== undefined) {
+                                blPayments[methodKey] += amount;
+                            }
                         }
+
+                        totalEncaissementBL += amount;
+                        totalPaiementsClients += amount;
+
+                        transactions.push({
+                            id: `bl_${bl.id}_pm_${idx}`,
+                            type: 'bon_livraison',
+                            numero: bl.numeroLivraison,
+                            date: pmDateStr,
+                            client: clientInfo.client,
+                            montant: amount,
+                            paymentMethods: [payment],
+                            source: `BL ${bl.numeroLivraison}`
+                        });
                     }
-
-                    paymentDetails.push({
-                        method: payment.method,
-                        amount: payment.amount,
-                        numero: payment.numero || '',
-                        banque: payment.banque || '',
-                        dateEcheance: payment.dateEcheance || '',
-                        tauxRetention: payment.tauxRetention || 0
-                    });
                 });
             }
 
+            // Handle standalone retenue if doc in range
             if (bl.hasRetenue && bl.montantRetenue > 0) {
-                const retenueAmount = Number(bl.montantRetenue || 0);
-                blPayments.retenue += retenueAmount;
-
-                const existingRetention = paymentDetails.find(p =>
-                    p.method.toLowerCase() === 'retenue' || p.method.toLowerCase() === 'retention'
-                );
-
-                if (existingRetention) {
-                    existingRetention.amount = retenueAmount;
-                    blPaymentTotal = blPaymentTotal - Number(existingRetention.amount || 0) + retenueAmount;
-                } else {
-                    paymentDetails.push({
-                        method: "Retenue",
-                        amount: retenueAmount,
-                        tauxRetention: 1
+                const docDate = moment(bl.dateLivraison).toDate();
+                if (docDate >= start && docDate <= end) {
+                    const retenueAmount = Number(bl.montantRetenue || 0);
+                    blPayments.retenue += retenueAmount;
+                    transactions.push({
+                        id: `bl_${bl.id}_retenue`,
+                        type: 'bon_livraison',
+                        numero: bl.numeroLivraison,
+                        date: bl.dateLivraison,
+                        client: clientInfo.client,
+                        montant: retenueAmount,
+                        paymentMethods: [{ method: "Retenue", amount: retenueAmount, tauxRetention: 1 }],
+                        source: `BL ${bl.numeroLivraison}`
                     });
-                    blPaymentTotal += retenueAmount;
                 }
-            }
-
-            if (blPaymentTotal > 0 || paymentDetails.length > 0) {
-                totalEncaissementBL += blPaymentTotal;
-                totalPaiementsClients += blPaymentTotal;
-
-                const clientInfo = getClientInfo(bl.client, null);
-
-                transactions.push({
-                    id: bl.id,
-                    type: 'bon_livraison',
-                    numero: bl.numeroLivraison,
-                    date: bl.dateLivraison,
-                    client: clientInfo.client,
-                    montant: blPaymentTotal,
-                    paymentMethods: paymentDetails,
-                    source: `BL ${bl.numeroLivraison}`
-                });
             }
         });
 
         // Process paiements BC & BL (PaiementClient)
         paiementsBC.forEach(paiement => {
-            let paiementAmount = 0;
-            const paymentDetails = [];
+            const documentClient = (paiement.bonCommandeClient?.client || paiement.bonLivraison?.client) || null;
+            const clientInfo = getClientInfo(paiement.client, documentClient);
 
             if (paiement.paymentMethods && paiement.paymentMethods.length > 0) {
-                paiement.paymentMethods.forEach(payment => {
+                paiement.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
-                    const method = payment.method || '';
+                    if (amount <= 0) return;
 
-                    paiementAmount += amount;
+                    const pmDateStr = payment.dateEcheance || paiement.date;
+                    const pmDate = moment(pmDateStr).toDate();
 
+                    if (pmDate >= start && pmDate <= end) {
+                        const method = payment.method || '';
+                        if (isRetention(method)) {
+                            if (paiement.bonLivraison_id) blPayments.retenue += amount;
+                            else bcPayments.retenue += amount;
+                        } else {
+                            const methodKey = method.toLowerCase();
+                            if (paiement.bonLivraison_id && blPayments[methodKey] !== undefined) {
+                                blPayments[methodKey] += amount;
+                            } else if (bcPayments[methodKey] !== undefined) {
+                                bcPayments[methodKey] += amount;
+                            }
+                        }
+
+                        if (paiement.bonCommandeClient_id) totalEncaissementBC += amount;
+                        else if (paiement.bonLivraison_id) totalEncaissementBL += amount;
+                        else totalEncaissementBC += amount;
+
+                        totalPaiementsClients += amount;
+
+                        transactions.push({
+                            id: `paiement_${paiement.id}_pm_${idx}`,
+                            type: paiement.bonLivraison_id ? 'paiement_bl' : 'paiement_bc',
+                            numero: paiement.numeroPaiement,
+                            date: pmDateStr,
+                            client: clientInfo.client,
+                            montant: amount,
+                            paymentMethods: [payment],
+                            source: paiement.bonCommandeClient ? `BC ${paiement.bonCommandeClient.numeroCommande}` : (paiement.bonLivraison ? `BL ${paiement.bonLivraison.numeroLivraison}` : 'Direct')
+                        });
+                    }
+                });
+            } else if (paiement.modePaiement) {
+                // Legacy support
+                const pmDateStr = paiement.dateEcheance || paiement.date;
+                const pmDate = moment(pmDateStr).toDate();
+                if (pmDate >= start && pmDate <= end) {
+                    const amount = Number(paiement.montant || 0);
+                    const method = paiement.modePaiement;
                     if (isRetention(method)) {
                         if (paiement.bonLivraison_id) blPayments.retenue += amount;
                         else bcPayments.retenue += amount;
                     } else {
                         const methodKey = method.toLowerCase();
-                        if (paiement.bonLivraison_id && blPayments[methodKey] !== undefined) {
-                            blPayments[methodKey] += amount;
-                        } else if (bcPayments[methodKey] !== undefined) {
-                            bcPayments[methodKey] += amount;
-                        }
+                        if (paiement.bonLivraison_id && blPayments[methodKey] !== undefined) blPayments[methodKey] += amount;
+                        else if (bcPayments[methodKey] !== undefined) bcPayments[methodKey] += amount;
                     }
-
-                    paymentDetails.push({
-                        method: payment.method,
-                        amount: payment.amount,
-                        numero: payment.numero || '',
-                        banque: payment.banque || '',
-                        dateEcheance: payment.dateEcheance || '',
-                        tauxRetention: payment.tauxRetention || 0
-                    });
-                });
-            } else {
-                // Legacy modePaiement field
-                if (paiement.modePaiement) {
-                    const amount = Number(paiement.montant || 0);
-                    const method = paiement.modePaiement;
-
-                    paiementAmount += amount;
-
-                    if (isRetention(method)) {
-                        if (paiement.bonCommandeClient_id) bcPayments.retenue += amount;
-                        if (paiement.bonLivraison_id) blPayments.retenue += amount;
-                        if (!paiement.bonCommandeClient_id && !paiement.bonLivraison_id) bcPayments.retenue += amount;
-                    } else {
-                        const methodKey = method.toLowerCase();
-                        if (paiement.bonCommandeClient_id && bcPayments[methodKey] !== undefined) {
-                            bcPayments[methodKey] += amount;
-                        } else if (paiement.bonLivraison_id && blPayments[methodKey] !== undefined) {
-                            blPayments[methodKey] += amount;
-                        } else {
-                            if (bcPayments[methodKey] !== undefined) bcPayments[methodKey] += amount;
-                        }
-                    }
-
-                    paymentDetails.push({
-                        method: paiement.modePaiement,
-                        amount: paiement.montant,
-                        numero: paiement.numeroCheque || paiement.numeroTraite || '',
-                        banque: paiement.banque || '',
-                        dateEcheance: paiement.dateEcheance || ''
+                    if (paiement.bonCommandeClient_id) totalEncaissementBC += amount;
+                    else if (paiement.bonLivraison_id) totalEncaissementBL += amount;
+                    else totalEncaissementBC += amount;
+                    totalPaiementsClients += amount;
+                    transactions.push({
+                        id: paiement.id,
+                        type: paiement.bonLivraison_id ? 'paiement_bl' : 'paiement_bc',
+                        numero: paiement.numeroPaiement,
+                        date: pmDateStr,
+                        client: clientInfo.client,
+                        montant: amount,
+                        paymentMethods: [{
+                            method: paiement.modePaiement,
+                            amount: paiement.montant,
+                            numero: paiement.numeroCheque || paiement.numeroTraite || '',
+                            banque: paiement.banque || '',
+                            dateEcheance: paiement.dateEcheance || ''
+                        }],
+                        source: paiement.bonCommandeClient ? `BC ${paiement.bonCommandeClient.numeroCommande}` : (paiement.bonLivraison ? `BL ${paiement.bonLivraison.numeroLivraison}` : 'Direct')
                     });
                 }
             }
 
-            // Add regular payments to transactions
-            if (paiementAmount > 0) {
-                if (paiement.bonCommandeClient_id) totalEncaissementBC += paiementAmount;
-                else if (paiement.bonLivraison_id) totalEncaissementBL += paiementAmount;
-                else totalEncaissementBC += paiementAmount; // Default
-
-                totalPaiementsClients += paiementAmount;
-
-                const documentClient = (paiement.bonCommandeClient?.client || paiement.bonLivraison?.client) || null;
-                const clientInfo = getClientInfo(paiement.client, documentClient);
-
-                transactions.push({
-                    id: paiement.id,
-                    type: paiement.bonLivraison_id ? 'paiement_bl' : 'paiement_bc',
-                    numero: paiement.numeroPaiement,
-                    numeroPaiement: paiement.numeroPaiement,
-                    date: paiement.date,
-                    client: clientInfo.client,
-                    clientObj: clientInfo.clientObj,
-                    montant: paiementAmount,
-                    paymentMethods: paymentDetails,
-                    hasRetenue: paiement.hasRetenue,
-                    montantRetenue: paiement.montantRetenue || 0,
-                    source: paiement.bonCommandeClient ? `BC ${paiement.bonCommandeClient.numeroCommande}` : (paiement.bonLivraison ? `BL ${paiement.bonLivraison.numeroLivraison}` : 'Direct'),
-                    bonCommandeClient: paiement.bonCommandeClient,
-                    bonLivraison: paiement.bonLivraison
-                });
-            }
-
-            // Handle retenue from montantRetenue field
+            // Handle standalone retenue if doc in range
             if (paiement.hasRetenue && paiement.montantRetenue > 0) {
-                const retenueAmount = Number(paiement.montantRetenue || 0);
-                if (paiement.bonCommandeClient_id) bcPayments.retenue += retenueAmount;
-                else if (paiement.bonLivraison_id) blPayments.retenue += retenueAmount;
-                else bcPayments.retenue += retenueAmount;
-
-                const documentClient = (paiement.bonCommandeClient?.client || paiement.bonLivraison?.client) || null;
-                const clientInfo = getClientInfo(paiement.client, documentClient);
-
-                transactions.push({
-                    id: `paiement_${paiement.id}_retenue`,
-                    type: paiement.bonLivraison_id ? 'paiement_bl' : 'paiement_bc',
-                    numero: paiement.numeroPaiement,
-                    numeroPaiement: paiement.numeroPaiement,
-                    date: paiement.date,
-                    client: clientInfo.client,
-                    clientObj: clientInfo.clientObj,
-                    montant: retenueAmount,
-                    paymentMethods: [{
-                        method: "Retenue",
-                        amount: retenueAmount,
-                        tauxRetention: paiement.tauxRetention || 0
-                    }],
-                    hasRetenue: true,
-                    montantRetenue: retenueAmount,
-                    source: paiement.bonCommandeClient ? `BC ${paiement.bonCommandeClient.numeroCommande}` : (paiement.bonLivraison ? `BL ${paiement.bonLivraison.numeroLivraison}` : 'Direct'),
-                    bonCommandeClient: paiement.bonCommandeClient,
-                    bonLivraison: paiement.bonLivraison
-                });
+                const docDate = moment(paiement.date).toDate();
+                if (docDate >= start && docDate <= end) {
+                    const retenueAmount = Number(paiement.montantRetenue || 0);
+                    if (paiement.bonCommandeClient_id) bcPayments.retenue += retenueAmount;
+                    else if (paiement.bonLivraison_id) blPayments.retenue += retenueAmount;
+                    else bcPayments.retenue += retenueAmount;
+                    transactions.push({
+                        id: `paiement_${paiement.id}_retenue`,
+                        type: paiement.bonLivraison_id ? 'paiement_bl' : 'paiement_bc',
+                        numero: paiement.numeroPaiement,
+                        date: paiement.date,
+                        client: clientInfo.client,
+                        montant: retenueAmount,
+                        paymentMethods: [{ method: "Retenue", amount: retenueAmount, tauxRetention: paiement.tauxRetention || 0 }],
+                        source: paiement.bonCommandeClient ? `BC ${paiement.bonCommandeClient.numeroCommande}` : (paiement.bonLivraison ? `BL ${paiement.bonLivraison.numeroLivraison}` : 'Direct')
+                    });
+                }
             }
         });
 
         // Process ventes comptoire
         ventes.forEach(vente => {
             if (vente.paymentMethods && vente.paymentMethods.length > 0) {
-                let ventePaymentTotal = 0;
-                const paymentDetails = [];
+                const clientInfo = getClientInfo(vente.client, null);
 
-                vente.paymentMethods.forEach(payment => {
+                vente.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
+                    if (amount <= 0) return;
+
                     const method = payment.method || '';
+                    const pmDateStr = payment.dateEcheance || vente.dateCommande;
+                    const pmDate = moment(pmDateStr).toDate();
 
-                    ventePaymentTotal += amount;
-
-                    if (isRetention(method)) {
-                        ventePayments.retenue += amount;
-                    } else {
-                        const methodKey = method.toLowerCase();
-                        if (ventePayments[methodKey] !== undefined) {
-                            ventePayments[methodKey] += amount;
+                    // Only include if payment date is in range
+                    if (pmDate >= start && pmDate <= end) {
+                        if (isRetention(method)) {
+                            ventePayments.retenue += amount;
+                        } else {
+                            const methodKey = method.toLowerCase();
+                            if (ventePayments[methodKey] !== undefined) {
+                                ventePayments[methodKey] += amount;
+                            }
                         }
+
+                        totalVentesComptoire += amount;
+                        totalPaiementsClients += amount;
+
+                        transactions.push({
+                            id: `${vente.id}_pm_${idx}`,
+                            type: 'vente_comptoire',
+                            numero: vente.numeroCommande,
+                            numeroCommande: vente.numeroCommande,
+                            date: pmDateStr,
+                            client: clientInfo.client || 'Comptoir',
+                            clientObj: clientInfo.clientObj,
+                            montant: amount,
+                            paymentMethods: [{
+                                method: payment.method,
+                                amount: payment.amount,
+                                numero: payment.numero || '',
+                                banque: payment.banque || '',
+                                dateEcheance: payment.dateEcheance || '',
+                                tauxRetention: payment.tauxRetention || 0
+                            }]
+                        });
                     }
-
-                    paymentDetails.push({
-                        method: payment.method,
-                        amount: payment.amount,
-                        numero: payment.numero || '',
-                        banque: payment.banque || '',
-                        dateEcheance: payment.dateEcheance || '',
-                        tauxRetention: payment.tauxRetention || 0
-                    });
                 });
-
-                // Add regular payments to transactions
-                if (ventePaymentTotal > 0) {
-                    totalVentesComptoire += ventePaymentTotal;
-                    totalPaiementsClients += ventePaymentTotal;
-
-                    const clientInfo = getClientInfo(vente.client, null);
-
-                    transactions.push({
-                        id: vente.id,
-                        type: 'vente_comptoire',
-                        numero: vente.numeroCommande,
-                        numeroCommande: vente.numeroCommande,
-                        date: vente.dateCommande,
-                        client: clientInfo.client || 'Comptoir',
-                        clientObj: clientInfo.clientObj,
-                        montant: ventePaymentTotal,
-                        paymentMethods: paymentDetails
-                    });
-                }
             }
         });
 
