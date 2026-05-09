@@ -21,8 +21,8 @@ exports.getTrésorerieData = async (req, res) => {
             });
         }
 
-        const start = moment(startDate).startOf('day').toDate();
-        const end = moment(endDate).endOf('day').toDate();
+        const start = new Date(`${startDate}T00:00:00`);
+        const end = new Date(`${endDate}T23:59:59`);
 
         // Get repositories
         const venteRepo = AppDataSource.getRepository(VenteComptoire);
@@ -36,61 +36,48 @@ exports.getTrésorerieData = async (req, res) => {
         // Fetch data with proper relations - Expanded to include updated documents
         const [ventes, encaissements, paiementsFournisseurs, factures, bonCommandes, bonLivraisons, paiementsBC] = await Promise.all([
             venteRepo.find({
-                where: [
-                    { dateCommande: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
-                relations: ['client']
-            }),
+    relations: ['client']
+}),
             encaissementRepo.find({
-                where: [
-                    { date: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
-                relations: ['client', 'factureClient', 'factureClient.client']
+            relations: ['client', 'factureClient', 'factureClient.client']
             }),
             paiementRepo.find({
-                where: [
-                    { datePaiement: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
                 relations: ['factureFournisseur']
             }),
             factureRepo.find({
-                where: [
-                    { dateFacture: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
                 relations: ['client']
             }),
             bcRepo.find({
-                where: [
-                    { dateCommande: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
+                where: [],
                 relations: ['client']
             }),
             blRepo.find({
-                where: [
-                    { dateLivraison: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
+                where: [],
                 relations: ['client']
             }),
             paiementClientRepo.find({
-                where: [
-                    { date: Between(start, end) },
-                    { updatedAt: Between(start, end) }
-                ],
                 relations: ['client', 'bonCommandeClient', 'bonCommandeClient.client', 'bonLivraison', 'bonLivraison.client']
             })
         ]);
 
-        // Initialize payment methods by source (INCLUDING retenue)
-        const bcPayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0 };
-        const blPayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0 };
-        const facturePayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0 };
-        const ventePayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0 };
+        // Initialize payment methods by source (INCLUDING retenue and tpe)
+        const bcPayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0, tpe: 0 };
+        const blPayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0, tpe: 0 };
+        const facturePayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0, tpe: 0 };
+        const ventePayments = { especes: 0, cheque: 0, virement: 0, traite: 0, autre: 0, retenue: 0, carte: 0, tpe: 0 };
+
+        // Safe date parser: treats YYYY-MM-DD strings as LOCAL time (not UTC)
+        // moment() parses date-only ISO strings as UTC which can cause off-by-1-hour bugs on UTC+1 servers
+        const parseDate = (str) => {
+            if (!str) return new Date(NaN);
+            if (str instanceof Date) return str;
+            // If it's a date-only string (YYYY-MM-DD), parse as local midnight
+            if (/^\d{4}-\d{2}-\d{2}$/.test(String(str))) {
+                return new Date(`${str}T00:00:00`);
+            }
+            // Otherwise let moment handle full ISO timestamps
+            return moment(str).toDate();
+        };
 
         // Calculate totals and process payment methods
         let totalEncaissementFacture = 0;
@@ -136,15 +123,15 @@ exports.getTrésorerieData = async (req, res) => {
         // Process Facture Client direct payments
         factures.forEach(facture => {
             const clientInfo = getClientInfo(facture.client, null);
-            
+
             if (facture.paymentMethods && facture.paymentMethods.length > 0) {
                 facture.paymentMethods.forEach((payment, idx) => {
                     const amount = Number(payment.amount || 0);
                     if (amount <= 0) return;
 
                     const method = payment.method || '';
-                    const pmDateStr = payment.dateEcheance || facture.dateFacture;
-                    const pmDate = moment(pmDateStr).toDate();
+                    const pmDateStr = payment.date || payment.dateEcheance || facture.dateFacture;
+                    const pmDate = parseDate(pmDateStr);
 
                     if (pmDate >= start && pmDate <= end) {
                         if (isRetention(method)) {
@@ -173,6 +160,7 @@ exports.getTrésorerieData = async (req, res) => {
                                 numero: payment.numero || '',
                                 banque: payment.banque || '',
                                 dateEcheance: payment.dateEcheance || '',
+                                date: payment.date || payment.dateEcheance || facture.dateFacture,
                                 tauxRetention: payment.tauxRetention || 0
                             }],
                             source: `Facture ${facture.numeroFacture}`
@@ -211,8 +199,8 @@ exports.getTrésorerieData = async (req, res) => {
                     const amount = Number(payment.amount || 0);
                     if (amount <= 0) return;
 
-                    const pmDateStr = payment.dateEcheance || encaissement.date;
-                    const pmDate = moment(pmDateStr).toDate();
+                    const pmDateStr = payment.date || payment.dateEcheance || encaissement.date;
+                    const pmDate = parseDate(pmDateStr);
 
                     if (pmDate >= start && pmDate <= end) {
                         const method = payment.method || '';
@@ -243,7 +231,7 @@ exports.getTrésorerieData = async (req, res) => {
             } else if (encaissement.modePaiement) {
                 // Legacy support
                 const pmDateStr = encaissement.dateEcheance || encaissement.date;
-                const pmDate = moment(pmDateStr).toDate();
+                const pmDate = parseDate(pmDateStr);
                 if (pmDate >= start && pmDate <= end) {
                     const amount = Number(encaissement.montant || 0);
                     const method = encaissement.modePaiement;
@@ -282,8 +270,8 @@ exports.getTrésorerieData = async (req, res) => {
                     const amount = Number(payment.amount || 0);
                     if (amount <= 0) return;
 
-                    const pmDateStr = payment.dateEcheance || bc.dateCommande;
-                    const pmDate = moment(pmDateStr).toDate();
+                    const pmDateStr = payment.date || payment.dateEcheance || bc.dateCommande;
+                    const pmDate = parseDate(pmDateStr);
 
                     if (pmDate >= start && pmDate <= end) {
                         const method = payment.method || '';
@@ -315,7 +303,7 @@ exports.getTrésorerieData = async (req, res) => {
 
             // Handle standalone retenue if doc in range
             if (bc.hasRetenue && bc.montantRetenue > 0) {
-                const docDate = moment(bc.dateCommande).toDate();
+                const docDate = parseDate(bc.dateCommande);
                 if (docDate >= start && docDate <= end) {
                     const retenueAmount = Number(bc.montantRetenue || 0);
                     bcPayments.retenue += retenueAmount;
@@ -341,8 +329,8 @@ exports.getTrésorerieData = async (req, res) => {
                     const amount = Number(payment.amount || 0);
                     if (amount <= 0) return;
 
-                    const pmDateStr = payment.dateEcheance || bl.dateLivraison;
-                    const pmDate = moment(pmDateStr).toDate();
+                    const pmDateStr = payment.date || payment.dateEcheance || bl.dateLivraison;
+                    const pmDate = parseDate(pmDateStr);
 
                     if (pmDate >= start && pmDate <= end) {
                         const method = payment.method || '';
@@ -374,7 +362,7 @@ exports.getTrésorerieData = async (req, res) => {
 
             // Handle standalone retenue if doc in range
             if (bl.hasRetenue && bl.montantRetenue > 0) {
-                const docDate = moment(bl.dateLivraison).toDate();
+                const docDate = parseDate(bl.dateLivraison);
                 if (docDate >= start && docDate <= end) {
                     const retenueAmount = Number(bl.montantRetenue || 0);
                     blPayments.retenue += retenueAmount;
@@ -402,8 +390,8 @@ exports.getTrésorerieData = async (req, res) => {
                     const amount = Number(payment.amount || 0);
                     if (amount <= 0) return;
 
-                    const pmDateStr = payment.dateEcheance || paiement.date;
-                    const pmDate = moment(pmDateStr).toDate();
+                    const pmDateStr = payment.date || payment.dateEcheance || paiement.date;
+                    const pmDate = parseDate(pmDateStr);
 
                     if (pmDate >= start && pmDate <= end) {
                         const method = payment.method || '';
@@ -440,7 +428,7 @@ exports.getTrésorerieData = async (req, res) => {
             } else if (paiement.modePaiement) {
                 // Legacy support
                 const pmDateStr = paiement.dateEcheance || paiement.date;
-                const pmDate = moment(pmDateStr).toDate();
+                const pmDate = parseDate(pmDateStr);
                 if (pmDate >= start && pmDate <= end) {
                     const amount = Number(paiement.montant || 0);
                     const method = paiement.modePaiement;
@@ -477,7 +465,7 @@ exports.getTrésorerieData = async (req, res) => {
 
             // Handle standalone retenue if doc in range
             if (paiement.hasRetenue && paiement.montantRetenue > 0) {
-                const docDate = moment(paiement.date).toDate();
+                const docDate = parseDate(paiement.date);
                 if (docDate >= start && docDate <= end) {
                     const retenueAmount = Number(paiement.montantRetenue || 0);
                     if (paiement.bonCommandeClient_id) bcPayments.retenue += retenueAmount;
@@ -507,8 +495,8 @@ exports.getTrésorerieData = async (req, res) => {
                     if (amount <= 0) return;
 
                     const method = payment.method || '';
-                    const pmDateStr = payment.dateEcheance || vente.dateCommande;
-                    const pmDate = moment(pmDateStr).toDate();
+                    const pmDateStr = payment.date || payment.dateEcheance || vente.dateCommande;
+                    const pmDate = parseDate(pmDateStr);
 
                     // Only include if payment date is in range
                     if (pmDate >= start && pmDate <= end) {
@@ -539,6 +527,7 @@ exports.getTrésorerieData = async (req, res) => {
                                 numero: payment.numero || '',
                                 banque: payment.banque || '',
                                 dateEcheance: payment.dateEcheance || '',
+                                date: payment.date || payment.dateEcheance || vente.dateCommande,
                                 tauxRetention: payment.tauxRetention || 0
                             }]
                         });
@@ -557,7 +546,8 @@ exports.getTrésorerieData = async (req, res) => {
             traite: bcPayments.traite + blPayments.traite + facturePayments.traite + ventePayments.traite,
             autre: bcPayments.autre + blPayments.autre + facturePayments.autre + ventePayments.autre,
             retenue: bcPayments.retenue + blPayments.retenue + facturePayments.retenue + ventePayments.retenue,
-            carte: bcPayments.carte + blPayments.carte + facturePayments.carte + ventePayments.carte
+            carte: bcPayments.carte + blPayments.carte + facturePayments.carte + ventePayments.carte,
+            tpe: bcPayments.tpe + blPayments.tpe + facturePayments.tpe + ventePayments.tpe
         };
 
         // Sort all transactions by date
@@ -603,7 +593,7 @@ exports.getTrésorerieData = async (req, res) => {
 
 
 // dashboardController.js
-const {  BonCommandeClientArticle } = require("../entities/BonCommandeClient");
+const { BonCommandeClientArticle } = require("../entities/BonCommandeClient");
 const { DevisClient, DevisClientArticle } = require("../entities/Devis");
 
 

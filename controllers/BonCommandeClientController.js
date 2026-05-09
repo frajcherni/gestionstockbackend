@@ -503,6 +503,7 @@ exports.updateBonCommandeClient = async (req, res) => {
             prix_ttc: prixUnitaire * (1 + tvaRate / 100),
             tva: tvaRate,
             remise: newItem.remise ? parseFloat(newItem.remise) : null,
+            designation: newItem.designation || existingItem.designation || "", // ADD THIS LINE
           });
         }
       }
@@ -562,6 +563,7 @@ exports.updateBonCommandeClient = async (req, res) => {
             prix_ttc: prix_ttc, // UPDATE THIS LINE - use the prix_ttc variable
             tva: tvaRate,
             remise: newItem.remise ? parseFloat(newItem.remise) : null,
+            designation: newItem.designation || article.designation || "", // ADD THIS LINE
           });
 
           await bonArticleRepo.save(bonArticle);
@@ -758,111 +760,128 @@ exports.getNextCommandeNumber = async (req, res) => {
 };
 
 exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
   try {
     const {
       numeroCommande,
       dateCommande,
-      status,
+      dateLivBonCommande,
       remise,
       remiseType,
       notes,
       client_id,
       vendeur_id,
+      depot_id,
       articles,
       taxMode,
+      totalTTC,
+      totalHT,
+      totalTVA,
+      totalTTCAfterRemise,
+      paymentMethods,
+      totalPaymentAmount,
+      espaceNotes,
     } = req.body;
 
-    const clientRepo = AppDataSource.getRepository(Client);
-    const vendeurRepo = AppDataSource.getRepository(Vendeur);
-    const articleRepo = AppDataSource.getRepository(Article);
-    const bonRepo = AppDataSource.getRepository(BonCommandeClient);
+    const clientRepo = queryRunner.manager.getRepository(Client);
+    const vendeurRepo = queryRunner.manager.getRepository(Vendeur);
+    const articleRepo = queryRunner.manager.getRepository(Article);
+    const bonRepo = queryRunner.manager.getRepository(BonCommandeClient);
+    const depotRepo = queryRunner.manager.getRepository(Depot);
 
-    // Validate required fields
-    if (
-      !numeroCommande ||
-      !client_id ||
-      !vendeur_id ||
-      !dateCommande ||
-      !status
-    ) {
-      return res
-        .status(400)
-        .json({ message: "Les champs obligatoires sont manquants" });
+    let depot = null;
+    if (depot_id) {
+      depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
+    }
+
+    if (!numeroCommande || !client_id || !vendeur_id || !dateCommande) {
+      await queryRunner.rollbackTransaction();
+      return res.status(400).json({ message: "Les champs obligatoires sont manquants" });
     }
 
     const client = await clientRepo.findOneBy({ id: parseInt(client_id) });
-    if (!client) return res.status(404).json({ message: "Client non trouv�" });
-
     const vendeur = await vendeurRepo.findOneBy({ id: parseInt(vendeur_id) });
-    if (!vendeur)
-      return res.status(404).json({ message: "Vendeur non trouv�" });
 
-    const hasPayments = req.body.paymentMethods && req.body.paymentMethods.length > 0;
-    const montantPaye = hasPayments ? parseFloat(req.body.totalPaymentAmount || 0) : 0;
-    const resteAPayer = parseFloat(req.body.totalTTC || 0) - montantPaye;
+    if (!client || !vendeur) {
+      await queryRunner.rollbackTransaction();
+      return res.status(404).json({ message: "Client ou vendeur non trouv" });
+    }
+
+    const hasPayments = paymentMethods && paymentMethods.length > 0;
+    const actualPaymentAmount = hasPayments ? parseFloat(totalPaymentAmount || 0) : 0;
+    const totalNet = parseFloat(totalTTCAfterRemise || totalTTC || 0);
+    const resteAPayer = totalNet - actualPaymentAmount;
 
     const bonCommande = {
       numeroCommande,
       dateCommande: new Date(dateCommande),
-      status,
+      dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : new Date(),
+      status: "Confirme",
       remise: remise || 0,
       remiseType: remiseType,
       notes: notes || null,
       client,
       vendeur,
+      depot: depot || null,
+      totalHT: parseFloat(totalHT || 0),
+      totalTVA: parseFloat(totalTVA || 0),
+      totalTTC: parseFloat(totalTTC || 0),
+      totalTTCAfterRemise: totalNet,
       taxMode,
-      paymentMethods: hasPayments ? req.body.paymentMethods : null,
-      totalPaymentAmount: montantPaye,
-      montantPaye: montantPaye,
-      resteAPayer: resteAPayer,
-      hasPayments: hasPayments,
-      espaceNotes: req.body.espaceNotes || null,
+      paymentMethods: hasPayments ? paymentMethods : null,
+      totalPaymentAmount: actualPaymentAmount,
+      montantPaye: actualPaymentAmount,
+      resteAPayer: Math.max(0, resteAPayer),
+      hasPayments: hasPayments && actualPaymentAmount > 0,
+      espaceNotes: espaceNotes || null,
       articles: [],
     };
 
-    // Validate articles
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
+      await queryRunner.rollbackTransaction();
       return res.status(400).json({ message: "Les articles sont requis" });
     }
 
     for (const item of articles) {
-      const article = await articleRepo.findOneBy({
-        id: parseInt(item.article_id),
-      });
+      const article = await articleRepo.findOneBy({ id: parseInt(item.article_id) });
       if (!article) {
-        return res
-          .status(404)
-          .json({ message: `Article avec ID ${item.article_id} non trouv�` });
+        await queryRunner.rollbackTransaction();
+        return res.status(404).json({ message: `Article avec ID ${item.article_id} non trouv` });
       }
 
-      let prixUnitaire = parseFloat(item.prixUnitaire);
+      let prixUnitaire = parseFloat(item.prix_unitaire || item.prixUnitaire);
+      let prix_ttc = parseFloat(item.prix_ttc || item.puv_ttc);
       const tvaRate = item.tva || 0;
 
-      if (!item.quantite || !item.prixUnitaire) {
-        return res.status(400).json({
-          message:
-            "Quantit� et prix unitaire sont obligatoires pour chaque article",
-        });
+      if (taxMode === "TTC") {
+        prixUnitaire = prix_ttc / (1 + tvaRate / 100);
       }
 
       const bonArticle = {
         article,
         quantite: parseInt(item.quantite),
         prixUnitaire,
+        prix_ttc,
         tva: tvaRate,
         remise: item.remise ? parseFloat(item.remise) : null,
-        designation: item.designation || article.designation || "", // ADD THIS LINE
-
+        designation: item.designation || article.designation || "",
       };
 
       bonCommande.articles.push(bonArticle);
     }
 
     const result = await bonRepo.save(bonCommande);
+    await queryRunner.commitTransaction();
     res.status(201).json(result);
   } catch (err) {
+    await queryRunner.rollbackTransaction();
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 
@@ -950,7 +969,7 @@ exports.getBonsCommandeClientPaginated = async (req, res) => {
       const regularPaiementsTotal = relevantPaiements
         .filter(p => p.modePaiement !== "Retention")
         .reduce((sum, p) => sum + parseFloat(p.montant || 0), 0);
-      
+
       const retentionPaiementsTotal = relevantPaiements
         .filter(p => p.modePaiement === "Retention")
         .reduce((sum, p) => sum + parseFloat(p.montant || 0), 0);

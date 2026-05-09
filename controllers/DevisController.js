@@ -122,6 +122,7 @@ exports.updateDevisClient = async (req, res) => {
           existing.prix_ttc = +prix_ttc.toFixed(3);
           existing.tva = tvaRate;
           existing.remise = item.remise ? parseFloat(item.remise) : null;
+          existing.designation = item.designation || existing.designation || ""; // ADD THIS LINE
 
           await devisArticleRepo.save(existing);
         } else {
@@ -134,6 +135,7 @@ exports.updateDevisClient = async (req, res) => {
             prix_ttc: +prix_ttc.toFixed(3),
             tva: tvaRate,
             remise: item.remise ? parseFloat(item.remise) : null,
+            designation: item.designation || article.designation || "", // ADD THIS LINE
           });
 
           await devisArticleRepo.save(devisArticle);
