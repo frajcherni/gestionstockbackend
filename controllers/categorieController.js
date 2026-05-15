@@ -45,7 +45,16 @@ const uploadMiddleware = upload.single('image');
 
 exports.getAll = async (req, res) => {
   try {
-    const list = await repo.find();
+    const onWebsite = req.query.onWebsite;
+    let list;
+    
+    if (onWebsite !== undefined) {
+      list = await repo.find({
+        where: { on_website: onWebsite === 'true' || onWebsite === true }
+      });
+    } else {
+      list = await repo.find();
+    }
     
     // Add parentName for frontend display
     const categoriesWithParentNames = list.map(cat => {

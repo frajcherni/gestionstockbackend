@@ -630,6 +630,20 @@ exports.searchArticles = async (req, res) => {
     // Always filter active articles first
     qb.where("article.active = :active", { active: true });
 
+    // Website specific filters - NEW
+    if (req.body.onWebsite !== undefined) {
+      qb.andWhere("article.on_website = :onWebsite", { onWebsite: req.body.onWebsite === true || req.body.onWebsite === "true" });
+    }
+    if (req.body.isOffre !== undefined) {
+      qb.andWhere("article.is_offre = :isOffre", { isOffre: req.body.isOffre === true || req.body.isOffre === "true" });
+    }
+    if (req.body.isTopSeller !== undefined) {
+      qb.andWhere("article.is_top_seller = :isTopSeller", { isTopSeller: req.body.isTopSeller === true || req.body.isTopSeller === "true" });
+    }
+    if (req.body.isNewArrival !== undefined) {
+      qb.andWhere("article.is_new_arrival = :isNewArrival", { isNewArrival: req.body.isNewArrival === true || req.body.isNewArrival === "true" });
+    }
+
     // Add type filter (Consigné/Non Consigné) - NEW
     if (req.body.type && req.body.type !== "All") {
       qb.andWhere("article.type = :type", { type: req.body.type });

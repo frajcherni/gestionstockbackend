@@ -26,7 +26,10 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
     else cb(new Error("Only images are allowed"), false);
-  }
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB
+  },
 });
 
 const uploadMiddleware = upload.single("image");
