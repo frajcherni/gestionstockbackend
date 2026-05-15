@@ -404,15 +404,12 @@ exports.createFactureClient = async (req, res) => {
     console.log("boncommandeclientid:", boncommandeclientid);
     console.log("venteComptoire_id:", venteComptoire_id); // ADD THIS: Debug log
 
-    // Check if numeroFacture is unique
-    const existingFacture = await factureRepo.findOne({
-      where: { numeroFacture },
-    });
-    if (existingFacture) {
-      await queryRunner.rollbackTransaction();
-      return res
-        .status(400)
-        .json({ message: "Numéro de facture déjà utilisé" });
+    // --- Ensure numeroFacture is unique (Server-side check) ---
+    const existing = await factureRepo.findOne({ where: { numeroFacture } });
+    let finalNumeroFacture = numeroFacture;
+    if (existing) {
+      // If already taken, generate the next truly available number
+      finalNumeroFacture = await generateFactureNumber(queryRunner.manager);
     }
 
     const client = await clientRepo.findOneBy({ id: parseInt(client_id) });
@@ -477,7 +474,7 @@ exports.createFactureClient = async (req, res) => {
 
     // Create the facture object
     const facture = {
-      numeroFacture,
+      numeroFacture: finalNumeroFacture,
       dateFacture: new Date(dateFacture),
       dateEcheance: dateEcheance ? new Date(dateEcheance) : null,
       status: "Validee",
@@ -858,52 +855,52 @@ exports.annulerFactureClient = async (req, res) => {
   }
 };
 
-exports.getNextFactureNumber = async (req, res) => {
-  try {
-    const year = new Date().getFullYear();
-    const prefix = "FACTURE-";
-    const repo = AppDataSource.getRepository(FactureClient);
+const generateFactureNumber = async (manager) => {
+  const year = new Date().getFullYear();
+  const prefix = "FACTURE-";
+  const repo = manager.getRepository(FactureClient);
 
-    // آخر Facture من نفس السنة
-    const lastFacture = await repo
-      .createQueryBuilder("fact")
-      .where("fact.numeroFacture ILIKE :pattern", {
-        pattern: `${prefix}%/${year}`,
-      })
-      .orderBy("fact.id", "DESC")
-      .getOne();
+  const lastFacture = await repo
+    .createQueryBuilder("fact")
+    .where("fact.numeroFacture ILIKE :pattern", {
+      pattern: `${prefix}%/${year}`,
+    })
+    .orderBy("fact.id", "DESC")
+    .getOne();
 
-    let nextSeq = 1;
+  let nextSeq = 1;
 
-    if (lastFacture && lastFacture.numeroFacture) {
-      // الصيغة: FACTURE-001/2026
-      const [facturePart, yearPart] =
-        lastFacture.numeroFacture.split("/");
-      const lastYear = parseInt(yearPart, 10);
+  if (lastFacture && lastFacture.numeroFacture) {
+    const parts = lastFacture.numeroFacture.split("/");
+    const facturePart = parts[0];
+    const yearPart = parts[1];
+    const lastYear = parseInt(yearPart, 10);
 
-      if (lastYear === year) {
-        const lastSeq = parseInt(facturePart.split("-")[1], 10);
+    if (lastYear === year) {
+      const seqPart = facturePart.split("-")[1];
+      const lastSeq = parseInt(seqPart, 10);
+      if (!isNaN(lastSeq)) {
         nextSeq = lastSeq + 1;
       }
     }
+  }
 
-    let nextFactureNumber;
+  let nextFactureNumber;
+  while (true) {
+    nextFactureNumber = `${prefix}${String(nextSeq).padStart(3, "0")}/${year}`;
+    const exists = await repo.findOne({
+      where: { numeroFacture: nextFactureNumber },
+    });
+    if (!exists) break;
+    nextSeq++;
+  }
+  return nextFactureNumber;
+};
 
-    while (true) {
-      nextFactureNumber = `${prefix}${String(nextSeq).padStart(
-        3,
-        "0"
-      )}/${year}`;
-
-      const exists = await repo.findOne({
-        where: { numeroFacture: nextFactureNumber },
-      });
-
-      if (!exists) break;
-      nextSeq++;
-    }
-
-    res.status(200).json({ numeroFacture: nextFactureNumber });
+exports.getNextFactureNumber = async (req, res) => {
+  try {
+    const nextNumber = await generateFactureNumber(AppDataSource.manager);
+    res.status(200).json({ numeroFacture: nextNumber });
   } catch (error) {
     console.error("❌ Error generating facture number:", error);
     res.status(500).json({ message: error.message });

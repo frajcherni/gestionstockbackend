@@ -132,8 +132,15 @@ exports.createBonCommandeClient = async (req, res) => {
     const totalNet = parseFloat(totalTTCAfterRemise || totalTTC || 0);
     const resteAPayer = totalNet - montantRetenue - actualPaymentAmount;
 
+    // --- Ensure numeroCommande is unique (Server-side check) ---
+    const existing = await bonRepo.findOne({ where: { numeroCommande } });
+    let finalNumeroCommande = numeroCommande;
+    if (existing) {
+      finalNumeroCommande = await generateBonCommandeNumber(queryRunner.manager);
+    }
+
     const bonCommande = {
-      numeroCommande,
+      numeroCommande: finalNumeroCommande,
       dateCommande: new Date(dateCommande),
       dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : null,
 
@@ -709,50 +716,51 @@ exports.annulerBonCommandeClient = async (req, res) => {
   }
 };
 
-exports.getNextCommandeNumber = async (req, res) => {
-  try {
-    const year = new Date().getFullYear();
-    const prefix = "BON DE COMMANDE-";
-    const bonRepo = AppDataSource.getRepository(BonCommandeClient);
+const generateBonCommandeNumber = async (manager) => {
+  const year = new Date().getFullYear();
+  const prefix = "BON DE COMMANDE-";
+  const bonRepo = manager.getRepository(BonCommandeClient);
 
-    // آخر BonCommande من نفس السنة
-    const lastBon = await bonRepo
-      .createQueryBuilder("bon")
-      .where("bon.numeroCommande ILIKE :pattern", {
-        pattern: `${prefix}%/${year}`,
-      })
-      .orderBy("bon.id", "DESC")
-      .getOne();
+  const lastBon = await bonRepo
+    .createQueryBuilder("bon")
+    .where("bon.numeroCommande ILIKE :pattern", {
+      pattern: `${prefix}%/${year}`,
+    })
+    .orderBy("bon.id", "DESC")
+    .getOne();
 
-    let nextSeq = 1;
+  let nextSeq = 1;
 
-    if (lastBon && lastBon.numeroCommande) {
-      // الصيغة: COMMANDE-001/2026
-      const [commandePart, yearPart] = lastBon.numeroCommande.split("/");
-      const lastYear = parseInt(yearPart, 10);
+  if (lastBon && lastBon.numeroCommande) {
+    const parts = lastBon.numeroCommande.split("/");
+    const commandePart = parts[0];
+    const yearPart = parts[1];
+    const lastYear = parseInt(yearPart, 10);
 
-      if (lastYear === year) {
-        const lastSeq = parseInt(commandePart.split("-")[1], 10);
+    if (lastYear === year) {
+      const seqPart = commandePart.split("-")[1];
+      const lastSeq = parseInt(seqPart, 10);
+      if (!isNaN(lastSeq)) {
         nextSeq = lastSeq + 1;
       }
     }
+  }
 
-    let nextCommandeNumber;
+  let nextCommandeNumber;
+  while (true) {
+    nextCommandeNumber = `${prefix}${String(nextSeq).padStart(3, "0")}/${year}`;
+    const exists = await bonRepo.findOne({
+      where: { numeroCommande: nextCommandeNumber },
+    });
+    if (!exists) break;
+    nextSeq++;
+  }
+  return nextCommandeNumber;
+};
 
-    while (true) {
-      nextCommandeNumber = `${prefix}${String(nextSeq).padStart(
-        3,
-        "0"
-      )}/${year}`;
-
-      const exists = await bonRepo.findOne({
-        where: { numeroCommande: nextCommandeNumber },
-      });
-
-      if (!exists) break;
-      nextSeq++;
-    }
-
+exports.getNextCommandeNumber = async (req, res) => {
+  try {
+    const nextCommandeNumber = await generateBonCommandeNumber(AppDataSource.manager);
     res.json({ numeroCommande: nextCommandeNumber });
   } catch (err) {
     console.error(err);
@@ -819,8 +827,15 @@ exports.createBonCommandeClientBasedOnDevis = async (req, res) => {
     const totalNet = parseFloat(totalTTCAfterRemise || totalTTC || 0);
     const resteAPayer = totalNet - actualPaymentAmount;
 
+    // --- Ensure numeroCommande is unique (Server-side check) ---
+    const existing = await bonRepo.findOne({ where: { numeroCommande } });
+    let finalNumeroCommande = numeroCommande;
+    if (existing) {
+      finalNumeroCommande = await generateBonCommandeNumber(queryRunner.manager);
+    }
+
     const bonCommande = {
-      numeroCommande,
+      numeroCommande: finalNumeroCommande,
       dateCommande: new Date(dateCommande),
       dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : new Date(),
       status: "Confirme",

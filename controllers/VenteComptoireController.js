@@ -168,7 +168,6 @@ exports.createVenteComptoire = async (req, res) => {
       };
       vente.articles.push(venteArticle);
 
-      // ✅ REDUCE STOCK (DEPOT AWARE)
       if (vente.depot) {
         await updateDepotStock(queryRunner.manager, article.id, vente.depot.id, -quantite);
       } else {
@@ -176,6 +175,13 @@ exports.createVenteComptoire = async (req, res) => {
         article.qte_physique -= quantite;
         await articleRepo.save(article);
       }
+    }
+
+    // --- Ensure numeroCommande is unique (Server-side check) ---
+    const existing = await venteRepo.findOne({ where: { numeroCommande: vente.numeroCommande } });
+    if (existing) {
+      // If already taken, generate the next truly available number
+      vente.numeroCommande = await generateVenteComptoireNumber(queryRunner.manager);
     }
 
     const totalAfterRemise =
@@ -592,43 +598,43 @@ exports.deleteVenteComptoire = async (req, res) => {
   }
 };
 
-exports.fetchNextVenteComptoireNumber = async (req, res) => {
-  try {
-    const repo = AppDataSource.getRepository(VenteComptoire);
+const generateVenteComptoireNumber = async (manager) => {
+  const repo = manager.getRepository(VenteComptoire);
+  const lastVente = await repo.findOne({
+    order: { id: "DESC" },
+  });
 
-    // آخر vente حسب id DESC
-    const lastVenteArr = await repo.find({
-      order: { id: "DESC" },
-      take: 1,
-    });
-    const lastVente = lastVenteArr[0]; // undefined إذا ما فمّاش record
+  const currentYear = new Date().getFullYear();
+  let nextSeq = 1;
 
-    const currentYear = new Date().getFullYear();
-    let nextSeq = 1;
+  if (lastVente && lastVente.numeroCommande) {
+    const parts = lastVente.numeroCommande.split("/");
+    const ventePart = parts[0];
+    const yearPart = parts[1];
+    const lastYear = parseInt(yearPart, 10);
 
-    if (lastVente && lastVente.numeroCommande) {
-      const [ventePart, yearPart] = lastVente.numeroCommande.split("/");
-      const lastYear = parseInt(yearPart, 10);
-
-      if (lastYear === currentYear) {
-        const lastSeq = parseInt(ventePart.split("-")[1], 10);
+    if (lastYear === currentYear) {
+      const seqPart = ventePart.split("-")[1];
+      const lastSeq = parseInt(seqPart, 10);
+      if (!isNaN(lastSeq)) {
         nextSeq = lastSeq + 1;
       }
     }
+  }
 
-    // Format: VENTE-0001/2026
-    let nextNumber;
-    while (true) {
-      nextNumber = `VENTE COMPTOIRE-${String(nextSeq).padStart(4, "0")}/${currentYear}`;
+  let nextNumber;
+  while (true) {
+    nextNumber = `VENTE COMPTOIRE-${String(nextSeq).padStart(4, "0")}/${currentYear}`;
+    const exists = await repo.findOne({ where: { numeroCommande: nextNumber } });
+    if (!exists) break;
+    nextSeq++;
+  }
+  return nextNumber;
+};
 
-      const exists = await repo.findOne({
-        where: { numeroCommande: nextNumber },
-      });
-
-      if (!exists) break;
-      nextSeq++;
-    }
-
+exports.fetchNextVenteComptoireNumber = async (req, res) => {
+  try {
+    const nextNumber = await generateVenteComptoireNumber(AppDataSource.manager);
     res.json({ numeroCommande: nextNumber });
   } catch (err) {
     console.error(err);

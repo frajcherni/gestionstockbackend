@@ -348,9 +348,16 @@ exports.createBonLivraison = async (req, res) => {
     const totalNet = parseFloat(totalTTCAfterRemise || totalTTC || 0);
     const resteAPayer = totalNet - montantRetenue - actualPaymentAmount;
 
+    // --- Ensure numeroLivraison is unique (Server-side check) ---
+    const existing = await bonRepo.findOne({ where: { numeroLivraison } });
+    let finalNumeroLivraison = numeroLivraison;
+    if (existing) {
+      finalNumeroLivraison = await generateBonLivraisonNumber(queryRunner.manager);
+    }
+
     // Create BL
     const bonLivraison = {
-      numeroLivraison,
+      numeroLivraison: finalNumeroLivraison,
       dateLivraison: new Date(dateLivraison),
       status: "Livré",
       remise: remise || 0,
@@ -846,50 +853,51 @@ exports.annulerBonLivraison = async (req, res) => {
   }
 };
 
-exports.getNextLivraisonNumber = async (req, res) => {
-  try {
-    const year = new Date().getFullYear();
-    const prefix = "LIVRAISON-";
-    const repo = AppDataSource.getRepository(BonLivraison);
+const generateBonLivraisonNumber = async (manager) => {
+  const year = new Date().getFullYear();
+  const prefix = "LIVRAISON-";
+  const repo = manager.getRepository(BonLivraison);
 
-    // آخر BonLivraison من نفس السنة
-    const lastBon = await repo
-      .createQueryBuilder("bon")
-      .where("bon.numeroLivraison ILIKE :pattern", {
-        pattern: `${prefix}%/${year}`,
-      })
-      .orderBy("bon.id", "DESC")
-      .getOne();
+  const lastBon = await repo
+    .createQueryBuilder("bon")
+    .where("bon.numeroLivraison ILIKE :pattern", {
+      pattern: `${prefix}%/${year}`,
+    })
+    .orderBy("bon.id", "DESC")
+    .getOne();
 
-    let nextSeq = 1;
+  let nextSeq = 1;
 
-    if (lastBon && lastBon.numeroLivraison) {
-      // الصيغة: LIVRAISON-001/2026
-      const [livraisonPart, yearPart] = lastBon.numeroLivraison.split("/");
-      const lastYear = parseInt(yearPart, 10);
+  if (lastBon && lastBon.numeroLivraison) {
+    const parts = lastBon.numeroLivraison.split("/");
+    const livraisonPart = parts[0];
+    const yearPart = parts[1];
+    const lastYear = parseInt(yearPart, 10);
 
-      if (lastYear === year) {
-        const lastSeq = parseInt(livraisonPart.split("-")[1], 10);
+    if (lastYear === year) {
+      const seqPart = livraisonPart.split("-")[1];
+      const lastSeq = parseInt(seqPart, 10);
+      if (!isNaN(lastSeq)) {
         nextSeq = lastSeq + 1;
       }
     }
+  }
 
-    let nextLivraisonNumber;
+  let nextLivraisonNumber;
+  while (true) {
+    nextLivraisonNumber = `${prefix}${String(nextSeq).padStart(3, "0")}/${year}`;
+    const exists = await repo.findOne({
+      where: { numeroLivraison: nextLivraisonNumber },
+    });
+    if (!exists) break;
+    nextSeq++;
+  }
+  return nextLivraisonNumber;
+};
 
-    while (true) {
-      nextLivraisonNumber = `${prefix}${String(nextSeq).padStart(
-        3,
-        "0"
-      )}/${year}`;
-
-      const exists = await repo.findOne({
-        where: { numeroLivraison: nextLivraisonNumber },
-      });
-
-      if (!exists) break;
-      nextSeq++;
-    }
-
+exports.getNextLivraisonNumber = async (req, res) => {
+  try {
+    const nextLivraisonNumber = await generateBonLivraisonNumber(AppDataSource.manager);
     res.json({
       numeroLivraison: nextLivraisonNumber,
     });
