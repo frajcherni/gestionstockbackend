@@ -44,9 +44,11 @@ app.use(
   })
 );
 
-app.use("/uploads", express.static("uploads", {
+app.use("/uploads", cors(), express.static("uploads", {
   setHeaders: (res) => {
+    res.set("Access-Control-Allow-Origin", "*");
     res.set("Cross-Origin-Resource-Policy", "cross-origin");
+    res.set("Cross-Origin-Embedder-Policy", "credentialless");
   }
 }));
 app.use(express.json({ limit: "50mb" }));
