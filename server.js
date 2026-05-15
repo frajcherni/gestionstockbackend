@@ -37,7 +37,7 @@ app.use("/uploads", express.static("uploads"));
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://localhost:5173", "http://54.37.159.225", "https://royallumiere.tn", "http://shop.royallumiere.tn",
+    origin: ["http://localhost:3000", "http://localhost:5173", "http://54.37.159.225", "https://royallumiere.tn", "https://shop.royallumiere.tn",
       "https://www.royallumiere.tn"], // 👈 Add your frontend URLs
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
