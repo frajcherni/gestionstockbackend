@@ -7,6 +7,9 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Use BASE_URL from env in production, fallback to req for local dev
+const getBaseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+
 const repo = AppDataSource.getRepository(Categorie);
 
 // Configure multer storage for categories
@@ -47,7 +50,7 @@ exports.getAll = async (req, res) => {
   try {
     const onWebsite = req.query.onWebsite;
     let list;
-    
+
     if (onWebsite !== undefined) {
       list = await repo.find({
         where: { on_website: onWebsite === 'true' || onWebsite === true }
@@ -55,24 +58,23 @@ exports.getAll = async (req, res) => {
     } else {
       list = await repo.find();
     }
-    
+
     // Add parentName for frontend display
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const categoriesWithParentNames = list.map(cat => {
       let parentName = null;
       if (cat.parent_id) {
         const parent = list.find(p => p.id === cat.parent_id);
         parentName = parent ? parent.nom : 'Unknown';
       }
-      
+
       return {
         ...cat,
         parentName: parentName,
         // Add full URL for images
-        image: cat.image ? `${baseUrl}/${cat.image.replace(/\\/g, "/")}` : null
+        image: cat.image ? `${getBaseUrl(req)}/${cat.image.replace(/\\/g, "/")}` : null
       };
     });
-    
+
     res.json(categoriesWithParentNames);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -81,20 +83,20 @@ exports.getAll = async (req, res) => {
 
 exports.create = async (req, res) => {
   // First, handle the file upload
-  uploadMiddleware(req, res, async function(err) {
+  uploadMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
     }
 
     try {
-      
+
       if (!req.body.nom) {
         // Delete uploaded file if validation fails
         if (req.file) {
           fs.unlinkSync(req.file.path);
         }
-        return res.status(400).json({ 
-          message: 'Category name is required' 
+        return res.status(400).json({
+          message: 'Category name is required'
         });
       }
 
@@ -107,17 +109,16 @@ exports.create = async (req, res) => {
         on_website: req.body.on_website === 'true' || req.body.on_website === true,
         website_order: parseInt(req.body.website_order) || 0
       };
-      
+
 
       const newItem = repo.create(data);
       const saved = await repo.save(newItem);
-      
+
       // Add full URL for image in response
       if (saved.image) {
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
-        saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
+        saved.image = `${getBaseUrl(req)}/${saved.image.replace(/\\/g, "/")}`;
       }
-      
+
       res.status(201).json(saved);
     } catch (error) {
       // Delete uploaded file if there's an error
@@ -131,7 +132,7 @@ exports.create = async (req, res) => {
 
 exports.update = async (req, res) => {
   // First, handle the file upload
-  uploadMiddleware(req, res, async function(err) {
+  uploadMiddleware(req, res, async function (err) {
     if (err) {
       return res.status(400).json({ message: err.message });
     }
@@ -139,7 +140,7 @@ exports.update = async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       let item = await repo.findOneBy({ id });
-      
+
       if (!item) {
         // Delete uploaded file if category not found
         if (req.file) {
@@ -171,13 +172,12 @@ exports.update = async (req, res) => {
 
       repo.merge(item, data);
       const updated = await repo.save(item);
-      
+
       // Add full URL for image in response
       if (updated.image) {
-        const baseUrl = `${req.protocol}://${req.get('host')}`;
-        updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
+        updated.image = `${getBaseUrl(req)}/${updated.image.replace(/\\/g, "/")}`;
       }
-      
+
       res.json(updated);
     } catch (error) {
       // Delete uploaded file if there's an error
@@ -193,7 +193,7 @@ exports.remove = async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const item = await repo.findOneBy({ id });
-    
+
     if (!item) {
       return res.status(404).json({ message: 'Category not found' });
     }
@@ -211,7 +211,7 @@ exports.remove = async (req, res) => {
     if (result.affected === 0) {
       return res.status(404).json({ message: 'Category not found' });
     }
-    
+
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ message: error.message });

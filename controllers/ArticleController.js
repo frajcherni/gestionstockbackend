@@ -1,6 +1,9 @@
 const { AppDataSource } = require("../db");
 const { Article } = require("../entities/Article");
 
+// Use BASE_URL from env in production, fallback to req for local dev
+const getBaseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+
 const { Fournisseur } = require("../entities/Fournisseur");
 const { Categorie } = require("../entities/Categorie");
 
@@ -66,8 +69,8 @@ exports.createArticle = async (req, res) => {
         if (req.file && fs.existsSync(req.file.path)) {
           fs.unlinkSync(req.file.path);
         }
-        return res.status(400).json({ 
-          message: `La référence "${req.body.reference}" existe déjà. Veuillez utiliser une référence unique.` 
+        return res.status(400).json({
+          message: `La référence "${req.body.reference}" existe déjà. Veuillez utiliser une référence unique.`
         });
       }
 
@@ -110,7 +113,7 @@ exports.createArticle = async (req, res) => {
         const countryCode = "330";
         const productNumber = nextId.toString().padStart(9, "0");
         const baseNumber = countryCode + productNumber;
-        
+
         let sum = 0;
         for (let i = 0; i < baseNumber.length; i++) {
           const digit = parseInt(baseNumber.charAt(i));
@@ -151,14 +154,14 @@ exports.createArticle = async (req, res) => {
       const savedArticle = await articleRepo.save(article);
       console.log("✅ Article saved with ID:", savedArticle.id);
 
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
       if (savedArticle.image) {
-        savedArticle.image = `${baseUrl}/${savedArticle.image.replace(/\\/g, "/")}`;
+        savedArticle.image = `${getBaseUrl(req)}/${savedArticle.image.replace(/\\/g, "/")
+          }`;
       }
 
       if (savedArticle.website_images) {
-        savedArticle.website_images = savedArticle.website_images.map(img => 
-           `${baseUrl}/${img.replace(/\\/g, "/")}`
+        savedArticle.website_images = savedArticle.website_images.map(img =>
+          `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
         );
       }
 
@@ -179,7 +182,7 @@ exports.getAllArticles = async (req, res) => {
   try {
     const depotId = req.query.depot_id;
     const articleRepo = AppDataSource.getRepository(Article);
-    
+
     let articles;
     if (depotId) {
       const { entities, raw } = await articleRepo.createQueryBuilder("article")
@@ -189,7 +192,7 @@ exports.getAllArticles = async (req, res) => {
         .leftJoin("article.stocks", "stock", "stock.depot_id = :depotId", { depotId: parseInt(depotId) })
         .addSelect("stock.qte", "article_qte_depot")
         .getRawAndEntities();
-      
+
       // Override qte with depot stock
       articles = entities.map((a, index) => {
         a.qte = parseInt(raw[index].article_qte_depot) || 0;
@@ -202,14 +205,13 @@ exports.getAllArticles = async (req, res) => {
     }
 
     // Add full URL for images
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
     const articlesWithImageUrl = articles.map((article) => ({
       ...article,
       image: article.image
-        ? `${baseUrl}/${article.image.replace(/\\/g, "/")}`
+        ? `${getBaseUrl(req)}/${article.image.replace(/\\/g, "/")}`
         : null,
-      website_images: (article.website_images || []).map(img => 
-        `${baseUrl}/${img.replace(/\\/g, "/")}`
+      website_images: (article.website_images || []).map(img =>
+        `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
       )
     }));
 
@@ -230,14 +232,14 @@ exports.getArticleById = async (req, res) => {
       return res.status(404).json({ message: "Article not found" });
     }
 
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    // Add full URL for image
     if (article.image) {
-      article.image = `${baseUrl}/${article.image.replace(/\\/g, "/")}`;
+      article.image = `${getBaseUrl(req)}/${article.image.replace(/\\/g, "/")}`;
     }
 
     if (article.website_images) {
-      article.website_images = article.website_images.map(img => 
-        `${baseUrl}/${img.replace(/\\/g, "/")}`
+      article.website_images = article.website_images.map(img =>
+        `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
       );
     }
 
@@ -300,14 +302,14 @@ exports.updateArticle = async (req, res) => {
           if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
           }
-          return res.status(400).json({ 
-            message: `La référence "${reference}" existe déjà. Veuillez utiliser une référence unique.` 
+          return res.status(400).json({
+            message: `La référence "${reference}" existe déjà. Veuillez utiliser une référence unique.`
           });
         }
       }
 
       const oldImagePath = article.image;
-      
+
       if (fournisseur_id) {
         const fournisseur = await fournisseurRepository.findOneBy({
           id: parseInt(fournisseur_id),
@@ -367,8 +369,7 @@ exports.updateArticle = async (req, res) => {
       const result = await articleRepository.save(article);
 
       if (result.image) {
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        result.image = `${baseUrl}/${result.image.replace(/\\/g, "/")}`;
+        result.image = `${getBaseUrl(req)}/${result.image.replace(/\\/g, "/")}`;
       }
 
       res.json(result);
@@ -398,24 +399,24 @@ exports.deleteArticle = async (req, res) => {
     // Try to delete the article
     try {
       const result = await articleRepository.delete(articleId);
-      
+
       if (result.affected === 0) {
         return res.status(404).json({ message: "Article not found" });
       }
-      
+
       // Successfully deleted
       return res.status(204).send();
-      
+
     } catch (deleteError) {
       // If delete fails (likely due to foreign key constraints - article used in facture/bon commande)
       // Deactivate the article instead
-      await articleRepository.update(articleId, { 
-        active: false 
+      await articleRepository.update(articleId, {
+        active: false
       });
-      
-      return res.status(200).json({ 
+
+      return res.status(200).json({
         message: "Article cannot be deleted as it's used in invoices or purchase orders. It has been deactivated instead.",
-        deactivated: true 
+        deactivated: true
       });
     }
 
@@ -685,14 +686,13 @@ exports.searchArticles = async (req, res) => {
       .getRawAndEntities();
 
     // --- Post-processing ---
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
     const articlesWithUrls = entities.map((a, index) => {
       const result = {
         ...a,
         // Ensure image URLs are full URLs
-        image: a.image ? `${baseUrl}/${a.image.replace(/\\/g, "/")}` : null,
-        website_images: (a.website_images || []).map(img => 
-          `${baseUrl}/${img.replace(/\\/g, "/")}`
+        image: a.image ? `${getBaseUrl(req)}/${a.image.replace(/\\/g, "/")}` : null,
+        website_images: (a.website_images || []).map(img =>
+          `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
         )
       };
 
@@ -700,7 +700,7 @@ exports.searchArticles = async (req, res) => {
       if (depotId && raw[index].article_qte_depot !== undefined) {
         result.qte = parseInt(raw[index].article_qte_depot) || 0;
       }
-      
+
       return result;
     });
 
@@ -717,4 +717,5 @@ exports.searchArticles = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 

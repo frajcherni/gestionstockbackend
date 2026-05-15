@@ -4,6 +4,9 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
+// Use BASE_URL from env in production, fallback to req for local dev
+const getBaseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+
 const carouselRepo = AppDataSource.getRepository(Carousel);
 
 // Multer config for carousel images
@@ -26,10 +29,7 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) cb(null, true);
     else cb(new Error("Only images are allowed"), false);
-  },
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB
-  },
+  }
 });
 
 const uploadMiddleware = upload.single("image");
@@ -39,15 +39,12 @@ exports.getAll = async (req, res) => {
     const slides = await carouselRepo.find({
       order: { order: "ASC" }
     });
-    
-    const formatted = slides.map(s => {
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      return {
-        ...s,
-        image: s.image ? `${baseUrl}/${s.image.replace(/\\/g, "/")}` : null
-      };
-    });
-    
+
+    const formatted = slides.map(s => ({
+      ...s,
+      image: s.image ? `${getBaseUrl(req)}/${s.image.replace(/\\/g, "/")}` : null
+    }));
+
     res.json(formatted);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -71,9 +68,8 @@ exports.create = async (req, res) => {
 
       const newItem = carouselRepo.create(data);
       const saved = await carouselRepo.save(newItem);
-      
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
+
+      saved.image = `${getBaseUrl(req)}/${saved.image.replace(/\\/g, "/")}`;
       res.status(201).json(saved);
     } catch (error) {
       if (req.file) fs.unlinkSync(req.file.path);
@@ -110,9 +106,8 @@ exports.update = async (req, res) => {
 
       carouselRepo.merge(item, data);
       const updated = await carouselRepo.save(item);
-      
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
-      updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
+
+      updated.image = `${getBaseUrl(req)}/${updated.image.replace(/\\/g, "/")}`;
       res.json(updated);
     } catch (error) {
       if (req.file) fs.unlinkSync(req.file.path);
