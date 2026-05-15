@@ -365,55 +365,63 @@ exports.getDevisPaginated = async (req, res) => {
     const take = parseInt(limit);
 
     const repo = AppDataSource.getRepository(DevisClient);
-    const queryBuilder = repo
-      .createQueryBuilder("devis")
-      .leftJoinAndSelect("devis.client", "client")
-      .leftJoinAndSelect("devis.vendeur", "vendeur")
-      .leftJoinAndSelect("devis.articles", "articles")
-      .leftJoinAndSelect("articles.article", "articleDetails");
+    // 1. Get paginated IDs first (Select order columns to avoid SQL error)
+    const idQb = repo.createQueryBuilder("devis")
+      .leftJoin("devis.client", "client")
+      .select(["devis.id", "devis.dateCommande"]);
 
-    // Search filter
     if (search) {
-      queryBuilder.andWhere(
+      idQb.andWhere(
         "(devis.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
         { search: `%${search}%` }
       );
     }
-
-    // Status filter
     if (status) {
-      queryBuilder.andWhere("devis.status = :status", { status });
+      idQb.andWhere("devis.status = :status", { status });
     }
-
-    // Date range filter
     if (startDate && endDate) {
-      queryBuilder.andWhere(
-        "devis.dateCommande BETWEEN :startDate AND :endDate",
-        {
-          startDate: `${startDate} 00:00:00`,
-          endDate: `${endDate} 23:59:59`,
-        }
-      );
+      idQb.andWhere("devis.dateCommande BETWEEN :startDate AND :endDate", {
+        startDate: `${startDate} 00:00:00`,
+        endDate: `${endDate} 23:59:59`,
+      });
     } else if (startDate) {
-      queryBuilder.andWhere("devis.dateCommande >= :startDate", {
+      idQb.andWhere("devis.dateCommande >= :startDate", {
         startDate: `${startDate} 00:00:00`,
       });
     } else if (endDate) {
-      queryBuilder.andWhere("devis.dateCommande <= :endDate", {
+      idQb.andWhere("devis.dateCommande <= :endDate", {
         endDate: `${endDate} 23:59:59`,
       });
     }
 
-    // Sorting
-    queryBuilder.orderBy("devis.dateCommande", "DESC");
-    queryBuilder.addOrderBy("devis.id", "DESC");
-    queryBuilder.addOrderBy("articles.id", "ASC");
-
-    // Pagination
-    const [devis, totalCount] = await queryBuilder
+    const totalCount = await idQb.getCount();
+    const idResults = await idQb
+      .orderBy("devis.dateCommande", "DESC")
+      .addOrderBy("devis.id", "DESC")
       .skip(skip)
       .take(take)
-      .getManyAndCount();
+      .getMany();
+
+    const ids = idResults.map(d => d.id);
+
+    if (ids.length === 0) {
+      return res.json({
+        devis: [],
+        pagination: { totalCount: 0, page: parseInt(page), limit: take, totalPages: 0 }
+      });
+    }
+
+    // 2. Fetch full data for those IDs
+    const devis = await repo.createQueryBuilder("devis")
+      .leftJoinAndSelect("devis.client", "client")
+      .leftJoinAndSelect("devis.vendeur", "vendeur")
+      .leftJoinAndSelect("devis.articles", "articles")
+      .leftJoinAndSelect("articles.article", "articleDetails")
+      .where("devis.id IN (:...ids)", { ids })
+      .orderBy("devis.dateCommande", "DESC")
+      .addOrderBy("devis.id", "DESC")
+      .addOrderBy("articles.id", "ASC")
+      .getMany();
 
     res.json({
       devis,
