@@ -61,24 +61,24 @@ exports.updateDevisClient = async (req, res) => {
       const requestedArticleIds = req.body.articles
         .map(item => parseInt(item.article_id))
         .filter(id => !isNaN(id));
-      
+
       console.log("Requested article IDs:", requestedArticleIds);
       console.log("Existing devis articles:", devis.articles.map(da => ({
         id: da.id,
         articleId: da.article.id,
         articleName: da.article.nom
       })));
-      
+
       // Find devis article records to delete (not just article IDs)
       const articlesToDelete = devis.articles.filter(
         da => !requestedArticleIds.includes(da.article.id)
       );
-      
+
       console.log("Articles to delete:", articlesToDelete.map(da => ({
         id: da.id,
         articleId: da.article.id
       })));
-      
+
       // Delete articles that are no longer in the list
       if (articlesToDelete.length > 0) {
         // Delete by IDs
@@ -109,7 +109,7 @@ exports.updateDevisClient = async (req, res) => {
         }
 
         console.log(prix_ttc);
-        
+
         // Check if article already exists in devis (using the loaded devis.articles array)
         const existing = devis.articles.find(
           da => da.article.id === article.id
@@ -365,63 +365,55 @@ exports.getDevisPaginated = async (req, res) => {
     const take = parseInt(limit);
 
     const repo = AppDataSource.getRepository(DevisClient);
-    // 1. Get paginated IDs first
-    const idQb = repo.createQueryBuilder("devis")
-      .leftJoin("devis.client", "client")
-      .select("devis.id");
+    const queryBuilder = repo
+      .createQueryBuilder("devis")
+      .leftJoinAndSelect("devis.client", "client")
+      .leftJoinAndSelect("devis.vendeur", "vendeur")
+      .leftJoinAndSelect("devis.articles", "articles")
+      .leftJoinAndSelect("articles.article", "articleDetails");
 
+    // Search filter
     if (search) {
-      idQb.andWhere(
+      queryBuilder.andWhere(
         "(devis.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
         { search: `%${search}%` }
       );
     }
+
+    // Status filter
     if (status) {
-      idQb.andWhere("devis.status = :status", { status });
+      queryBuilder.andWhere("devis.status = :status", { status });
     }
+
+    // Date range filter
     if (startDate && endDate) {
-      idQb.andWhere("devis.dateCommande BETWEEN :startDate AND :endDate", {
-        startDate: `${startDate} 00:00:00`,
-        endDate: `${endDate} 23:59:59`,
-      });
+      queryBuilder.andWhere(
+        "devis.dateCommande BETWEEN :startDate AND :endDate",
+        {
+          startDate: `${startDate} 00:00:00`,
+          endDate: `${endDate} 23:59:59`,
+        }
+      );
     } else if (startDate) {
-      idQb.andWhere("devis.dateCommande >= :startDate", {
+      queryBuilder.andWhere("devis.dateCommande >= :startDate", {
         startDate: `${startDate} 00:00:00`,
       });
     } else if (endDate) {
-      idQb.andWhere("devis.dateCommande <= :endDate", {
+      queryBuilder.andWhere("devis.dateCommande <= :endDate", {
         endDate: `${endDate} 23:59:59`,
       });
     }
 
-    const totalCount = await idQb.getCount();
-    const idResults = await idQb
-      .orderBy("devis.dateCommande", "DESC")
-      .addOrderBy("devis.id", "DESC")
+    // Sorting
+    queryBuilder.orderBy("devis.dateCommande", "DESC");
+    queryBuilder.addOrderBy("devis.id", "DESC");
+    queryBuilder.addOrderBy("articles.id", "ASC");
+
+    // Pagination
+    const [devis, totalCount] = await queryBuilder
       .skip(skip)
       .take(take)
-      .getMany();
-
-    const ids = idResults.map(d => d.id);
-
-    if (ids.length === 0) {
-      return res.json({
-        devis: [],
-        pagination: { totalCount: 0, page: parseInt(page), limit: take, totalPages: 0 }
-      });
-    }
-
-    // 2. Fetch full data for those IDs
-    const devis = await repo.createQueryBuilder("devis")
-      .leftJoinAndSelect("devis.client", "client")
-      .leftJoinAndSelect("devis.vendeur", "vendeur")
-      .leftJoinAndSelect("devis.articles", "articles")
-      .leftJoinAndSelect("articles.article", "articleDetails")
-      .where("devis.id IN (:...ids)", { ids })
-      .orderBy("devis.dateCommande", "DESC")
-      .addOrderBy("devis.id", "DESC")
-      .addOrderBy("articles.id", "ASC")
-      .getMany();
+      .getManyAndCount();
 
     res.json({
       devis,

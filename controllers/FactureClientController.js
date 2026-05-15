@@ -172,50 +172,8 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
     const encRepo = AppDataSource.getRepository(EncaissementClient);
 
     // Build query with filters
-    // 1. Get paginated IDs first
-    const idQb = repo.createQueryBuilder("facture")
-      .leftJoin("facture.client", "client")
-      .select("facture.id");
-
-    if (search) {
-      idQb.andWhere(
-        "(facture.numeroFacture ILIKE :search OR client.raison_sociale ILIKE :search OR client.designation ILIKE :search)",
-        { search: `%${search}%` }
-      );
-    }
-    if (searchPhone) {
-      const cleanPhone = searchPhone.replace(/\s/g, "");
-      idQb.andWhere(
-        "(REPLACE(client.telephone1, ' ', '') ILIKE :phone OR REPLACE(client.telephone2, ' ', '') ILIKE :phone)",
-        { phone: `%${cleanPhone}%` }
-      );
-    }
-    if (startDate) {
-      idQb.andWhere("facture.dateFacture >= :startDate", { startDate });
-    }
-    if (endDate) {
-      idQb.andWhere("facture.dateFacture <= :endDate", { endDate: endDate + "T23:59:59" });
-    }
-
-    const totalCount = await idQb.getCount();
-    const idResults = await idQb
-      .orderBy("facture.dateFacture", "DESC")
-      .addOrderBy("facture.numeroFacture", "DESC")
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getMany();
-
-    const ids = idResults.map(f => f.id);
-
-    if (ids.length === 0) {
-      return res.json({
-        factures: [],
-        pagination: { totalCount: 0, page, limit, totalPages: 0 }
-      });
-    }
-
-    // 2. Fetch full data for those IDs
-    const factures = await repo.createQueryBuilder("facture")
+    const qb = repo
+      .createQueryBuilder("facture")
       .leftJoinAndSelect("facture.client", "client")
       .leftJoinAndSelect("facture.vendeur", "vendeur")
       .leftJoinAndSelect("facture.depot", "depot")
@@ -225,12 +183,42 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
       .leftJoinAndSelect("facture.bonCommandeClient", "bonCommandeClient")
       .leftJoinAndSelect("bonCommandeClient.paiements", "bonCommandePaiements")
       .leftJoinAndSelect("facture.articles", "articles")
-      .leftJoinAndSelect("articles.article", "article")
-      .where("facture.id IN (:...ids)", { ids })
-      .orderBy("facture.dateFacture", "DESC")
+      .leftJoinAndSelect("articles.article", "article");
+
+    // Apply search filters
+    if (search) {
+      qb.andWhere(
+        "(facture.numeroFacture ILIKE :search OR client.raison_sociale ILIKE :search OR client.designation ILIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+
+    if (searchPhone) {
+      const cleanPhone = searchPhone.replace(/\s/g, "");
+      qb.andWhere(
+        "(REPLACE(client.telephone1, ' ', '') ILIKE :phone OR REPLACE(client.telephone2, ' ', '') ILIKE :phone)",
+        { phone: `%${cleanPhone}%` }
+      );
+    }
+
+    if (startDate) {
+      qb.andWhere("facture.dateFacture >= :startDate", { startDate });
+    }
+    if (endDate) {
+      qb.andWhere("facture.dateFacture <= :endDate", { endDate: endDate + "T23:59:59" });
+    }
+
+    // Get total count BEFORE pagination (for the UI)
+    const totalCount = await qb.getCount();
+
+    // Apply ordering and pagination
+    qb.orderBy("facture.dateFacture", "DESC")
       .addOrderBy("facture.numeroFacture", "DESC")
       .addOrderBy("articles.id", "ASC")
-      .getMany();
+      .skip((page - 1) * limit)
+      .take(limit);
+
+    const factures = await qb.getMany();
 
     // Get ALL encaissements for the fetched facture IDs only (not all encaissements)
     const factureIds = factures.map((f) => f.id);
