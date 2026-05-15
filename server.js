@@ -33,7 +33,7 @@ const CarouselRoutes = require("./routes/CarouselRoutes");
 // Use the routes
 
 const app = express();
-app.set("trust proxy", true);
+app.use("/uploads", express.static("uploads"));
 
 app.use(
   cors({
@@ -43,14 +43,6 @@ app.use(
     credentials: true,
   })
 );
-
-app.use("/uploads", cors(), express.static("uploads", {
-  setHeaders: (res) => {
-    res.set("Access-Control-Allow-Origin", "*");
-    res.set("Cross-Origin-Resource-Policy", "cross-origin");
-    res.set("Cross-Origin-Embedder-Policy", "credentialless");
-  }
-}));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 

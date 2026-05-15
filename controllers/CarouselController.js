@@ -4,9 +4,6 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Use BASE_URL from env in production, fallback to req for local dev
-const getBaseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-
 const carouselRepo = AppDataSource.getRepository(Carousel);
 
 // Multer config for carousel images
@@ -42,7 +39,7 @@ exports.getAll = async (req, res) => {
 
     const formatted = slides.map(s => ({
       ...s,
-      image: s.image ? `${getBaseUrl(req)}/${s.image.replace(/\\/g, "/")}` : null
+      image: `${req.protocol}://${req.get("host")}/${s.image.replace(/\\/g, "/")}`
     }));
 
     res.json(formatted);
@@ -69,7 +66,7 @@ exports.create = async (req, res) => {
       const newItem = carouselRepo.create(data);
       const saved = await carouselRepo.save(newItem);
 
-      saved.image = `${getBaseUrl(req)}/${saved.image.replace(/\\/g, "/")}`;
+      saved.image = `${req.protocol}://${req.get("host")}/${saved.image.replace(/\\/g, "/")}`;
       res.status(201).json(saved);
     } catch (error) {
       if (req.file) fs.unlinkSync(req.file.path);
@@ -107,7 +104,7 @@ exports.update = async (req, res) => {
       carouselRepo.merge(item, data);
       const updated = await carouselRepo.save(item);
 
-      updated.image = `${getBaseUrl(req)}/${updated.image.replace(/\\/g, "/")}`;
+      updated.image = `${req.protocol}://${req.get("host")}/${updated.image.replace(/\\/g, "/")}`;
       res.json(updated);
     } catch (error) {
       if (req.file) fs.unlinkSync(req.file.path);

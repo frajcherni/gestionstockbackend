@@ -1,9 +1,6 @@
 const { AppDataSource } = require("../db");
 const { Article } = require("../entities/Article");
 
-// Use BASE_URL from env in production, fallback to req for local dev
-const getBaseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-
 const { Fournisseur } = require("../entities/Fournisseur");
 const { Categorie } = require("../entities/Categorie");
 
@@ -155,13 +152,13 @@ exports.createArticle = async (req, res) => {
       console.log("✅ Article saved with ID:", savedArticle.id);
 
       if (savedArticle.image) {
-        savedArticle.image = `${getBaseUrl(req)}/${savedArticle.image.replace(/\\/g, "/")
+        savedArticle.image = `${req.protocol}://${req.get("host")}/${savedArticle.image.replace(/\\/g, "/")
           }`;
       }
 
       if (savedArticle.website_images) {
         savedArticle.website_images = savedArticle.website_images.map(img =>
-          `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
+          `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
         );
       }
 
@@ -208,10 +205,10 @@ exports.getAllArticles = async (req, res) => {
     const articlesWithImageUrl = articles.map((article) => ({
       ...article,
       image: article.image
-        ? `${getBaseUrl(req)}/${article.image.replace(/\\/g, "/")}`
+        ? `${req.protocol}://${req.get("host")}/${article.image.replace(/\\/g, "/")}`
         : null,
       website_images: (article.website_images || []).map(img =>
-        `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
+        `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
       )
     }));
 
@@ -234,12 +231,12 @@ exports.getArticleById = async (req, res) => {
 
     // Add full URL for image
     if (article.image) {
-      article.image = `${getBaseUrl(req)}/${article.image.replace(/\\/g, "/")}`;
+      article.image = `${req.protocol}://${req.get("host")}/${article.image.replace(/\\/g, "/")}`;
     }
 
     if (article.website_images) {
       article.website_images = article.website_images.map(img =>
-        `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
+        `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
       );
     }
 
@@ -369,7 +366,7 @@ exports.updateArticle = async (req, res) => {
       const result = await articleRepository.save(article);
 
       if (result.image) {
-        result.image = `${getBaseUrl(req)}/${result.image.replace(/\\/g, "/")}`;
+        result.image = `${req.protocol}://${req.get("host")}/${result.image.replace(/\\/g, "/")}`;
       }
 
       res.json(result);
@@ -690,9 +687,9 @@ exports.searchArticles = async (req, res) => {
       const result = {
         ...a,
         // Ensure image URLs are full URLs
-        image: a.image ? `${getBaseUrl(req)}/${a.image.replace(/\\/g, "/")}` : null,
+        image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null,
         website_images: (a.website_images || []).map(img =>
-          `${getBaseUrl(req)}/${img.replace(/\\/g, "/")}`
+          `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
         )
       };
 
@@ -717,5 +714,4 @@ exports.searchArticles = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
 

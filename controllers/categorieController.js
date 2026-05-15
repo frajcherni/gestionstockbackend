@@ -7,9 +7,6 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Use BASE_URL from env in production, fallback to req for local dev
-const getBaseUrl = (req) => process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-
 const repo = AppDataSource.getRepository(Categorie);
 
 // Configure multer storage for categories
@@ -71,7 +68,7 @@ exports.getAll = async (req, res) => {
         ...cat,
         parentName: parentName,
         // Add full URL for images
-        image: cat.image ? `${getBaseUrl(req)}/${cat.image.replace(/\\/g, "/")}` : null
+        image: cat.image ? `${req.protocol}://${req.get('host')}/${cat.image.replace(/\\/g, "/")}` : null
       };
     });
 
@@ -116,7 +113,7 @@ exports.create = async (req, res) => {
 
       // Add full URL for image in response
       if (saved.image) {
-        saved.image = `${getBaseUrl(req)}/${saved.image.replace(/\\/g, "/")}`;
+        saved.image = `${req.protocol}://${req.get('host')}/${saved.image.replace(/\\/g, "/")}`;
       }
 
       res.status(201).json(saved);
@@ -175,7 +172,7 @@ exports.update = async (req, res) => {
 
       // Add full URL for image in response
       if (updated.image) {
-        updated.image = `${getBaseUrl(req)}/${updated.image.replace(/\\/g, "/")}`;
+        updated.image = `${req.protocol}://${req.get('host')}/${updated.image.replace(/\\/g, "/")}`;
       }
 
       res.json(updated);
