@@ -40,10 +40,13 @@ exports.getAll = async (req, res) => {
       order: { order: "ASC" }
     });
     
-    const formatted = slides.map(s => ({
-      ...s,
-      image: `${req.protocol}://${req.get("host")}/${s.image.replace(/\\/g, "/")}`
-    }));
+    const formatted = slides.map(s => {
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      return {
+        ...s,
+        image: s.image ? `${baseUrl}/${s.image.replace(/\\/g, "/")}` : null
+      };
+    });
     
     res.json(formatted);
   } catch (error) {
@@ -69,7 +72,8 @@ exports.create = async (req, res) => {
       const newItem = carouselRepo.create(data);
       const saved = await carouselRepo.save(newItem);
       
-      saved.image = `${req.protocol}://${req.get("host")}/${saved.image.replace(/\\/g, "/")}`;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
       res.status(201).json(saved);
     } catch (error) {
       if (req.file) fs.unlinkSync(req.file.path);
@@ -107,7 +111,8 @@ exports.update = async (req, res) => {
       carouselRepo.merge(item, data);
       const updated = await carouselRepo.save(item);
       
-      updated.image = `${req.protocol}://${req.get("host")}/${updated.image.replace(/\\/g, "/")}`;
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
       res.json(updated);
     } catch (error) {
       if (req.file) fs.unlinkSync(req.file.path);

@@ -57,6 +57,7 @@ exports.getAll = async (req, res) => {
     }
     
     // Add parentName for frontend display
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const categoriesWithParentNames = list.map(cat => {
       let parentName = null;
       if (cat.parent_id) {
@@ -68,7 +69,7 @@ exports.getAll = async (req, res) => {
         ...cat,
         parentName: parentName,
         // Add full URL for images
-        image: cat.image ? `${req.protocol}://${req.get('host')}/${cat.image.replace(/\\/g, "/")}` : null
+        image: cat.image ? `${baseUrl}/${cat.image.replace(/\\/g, "/")}` : null
       };
     });
     
@@ -113,7 +114,8 @@ exports.create = async (req, res) => {
       
       // Add full URL for image in response
       if (saved.image) {
-        saved.image = `${req.protocol}://${req.get('host')}/${saved.image.replace(/\\/g, "/")}`;
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
       }
       
       res.status(201).json(saved);
@@ -172,7 +174,8 @@ exports.update = async (req, res) => {
       
       // Add full URL for image in response
       if (updated.image) {
-        updated.image = `${req.protocol}://${req.get('host')}/${updated.image.replace(/\\/g, "/")}`;
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
       }
       
       res.json(updated);

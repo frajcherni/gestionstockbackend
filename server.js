@@ -33,6 +33,7 @@ const CarouselRoutes = require("./routes/CarouselRoutes");
 // Use the routes
 
 const app = express();
+app.set("trust proxy", true);
 app.use("/uploads", express.static("uploads"));
 
 app.use(
