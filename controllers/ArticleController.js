@@ -152,13 +152,14 @@ exports.createArticle = async (req, res) => {
       console.log("✅ Article saved with ID:", savedArticle.id);
 
       if (savedArticle.image) {
-        savedArticle.image = `${req.protocol}://${req.get("host")}/${savedArticle.image.replace(/\\/g, "/")
-          }`;
+        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+        savedArticle.image = `${baseUrl}/${savedArticle.image.replace(/\\/g, "/")}`;
       }
 
       if (savedArticle.website_images) {
+        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
         savedArticle.website_images = savedArticle.website_images.map(img =>
-          `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+          `${baseUrl}/${img.replace(/\\/g, "/")}`
         );
       }
 
@@ -202,13 +203,14 @@ exports.getAllArticles = async (req, res) => {
     }
 
     // Add full URL for images
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
     const articlesWithImageUrl = articles.map((article) => ({
       ...article,
       image: article.image
-        ? `${req.protocol}://${req.get("host")}/${article.image.replace(/\\/g, "/")}`
+        ? `${baseUrl}/${article.image.replace(/\\/g, "/")}`
         : null,
       website_images: (article.website_images || []).map(img =>
-        `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+        `${baseUrl}/${img.replace(/\\/g, "/")}`
       )
     }));
 
@@ -230,13 +232,14 @@ exports.getArticleById = async (req, res) => {
     }
 
     // Add full URL for image
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
     if (article.image) {
-      article.image = `${req.protocol}://${req.get("host")}/${article.image.replace(/\\/g, "/")}`;
+      article.image = `${baseUrl}/${article.image.replace(/\\/g, "/")}`;
     }
 
     if (article.website_images) {
       article.website_images = article.website_images.map(img =>
-        `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+        `${baseUrl}/${img.replace(/\\/g, "/")}`
       );
     }
 
@@ -366,7 +369,8 @@ exports.updateArticle = async (req, res) => {
       const result = await articleRepository.save(article);
 
       if (result.image) {
-        result.image = `${req.protocol}://${req.get("host")}/${result.image.replace(/\\/g, "/")}`;
+        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+        result.image = `${baseUrl}/${result.image.replace(/\\/g, "/")}`;
       }
 
       res.json(result);
@@ -531,10 +535,18 @@ exports.uploadWebsiteImages = async (req, res) => {
 
       const updatedArticle = await articleRepo.save(article);
 
+      const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const formattedImages = updatedArticle.website_images.map(img =>
+        `${baseUrl}/${img.replace(/\\/g, "/")}`
+      );
+
       res.json({
         message: "Images uploaded successfully",
-        images: newImages,
-        article: updatedArticle,
+        images: newImages.map(img => `${baseUrl}/${img.replace(/\\/g, "/")}`),
+        article: {
+          ...updatedArticle,
+          website_images: formattedImages
+        },
       });
     } catch (error) {
       // Clean up uploaded files on error
@@ -582,9 +594,17 @@ exports.removeWebsiteImage = async (req, res) => {
       fs.unlinkSync(imageToRemove);
     }
 
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+    const formattedImages = updatedArticle.website_images.map(img =>
+      `${baseUrl}/${img.replace(/\\/g, "/")}`
+    );
+
     res.json({
       message: "Image removed successfully",
-      article: updatedArticle,
+      article: {
+        ...updatedArticle,
+        website_images: formattedImages
+      },
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -683,13 +703,14 @@ exports.searchArticles = async (req, res) => {
       .getRawAndEntities();
 
     // --- Post-processing ---
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
     const articlesWithUrls = entities.map((a, index) => {
       const result = {
         ...a,
         // Ensure image URLs are full URLs
-        image: a.image ? `${req.protocol}://${req.get("host")}/${a.image.replace(/\\/g, "/")}` : null,
+        image: a.image ? `${baseUrl}/${a.image.replace(/\\/g, "/")}` : null,
         website_images: (a.website_images || []).map(img =>
-          `${req.protocol}://${req.get("host")}/${img.replace(/\\/g, "/")}`
+          `${baseUrl}/${img.replace(/\\/g, "/")}`
         )
       };
 

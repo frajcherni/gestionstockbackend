@@ -68,7 +68,7 @@ exports.getAll = async (req, res) => {
         ...cat,
         parentName: parentName,
         // Add full URL for images
-        image: cat.image ? `${req.protocol}://${req.get('host')}/${cat.image.replace(/\\/g, "/")}` : null
+        image: cat.image ? `${process.env.BASE_URL || `${req.protocol}://${req.get('host')}`}/${cat.image.replace(/\\/g, "/")}` : null
       };
     });
 
@@ -113,7 +113,8 @@ exports.create = async (req, res) => {
 
       // Add full URL for image in response
       if (saved.image) {
-        saved.image = `${req.protocol}://${req.get('host')}/${saved.image.replace(/\\/g, "/")}`;
+        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+        saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
       }
 
       res.status(201).json(saved);
@@ -172,7 +173,8 @@ exports.update = async (req, res) => {
 
       // Add full URL for image in response
       if (updated.image) {
-        updated.image = `${req.protocol}://${req.get('host')}/${updated.image.replace(/\\/g, "/")}`;
+        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+        updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
       }
 
       res.json(updated);
