@@ -12,7 +12,7 @@ const repo = AppDataSource.getRepository(Categorie);
 // Configure multer storage for categories
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = 'uploads/categories/';
+    const uploadDir = path.join(__dirname, "..", "uploads", "categories");
     // Create directory if it doesn't exist
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });

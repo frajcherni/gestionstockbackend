@@ -9,7 +9,7 @@ const carouselRepo = AppDataSource.getRepository(Carousel);
 // Multer config for carousel images
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = "uploads/carousel/";
+    const uploadDir = path.join(__dirname, "..", "uploads", "carousel");
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }

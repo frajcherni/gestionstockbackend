@@ -12,7 +12,7 @@ const fs = require("fs");
 // Configure multer storage
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = "uploads/articles/";
+    const uploadDir = path.join(__dirname, "..", "uploads", "articles");
     // Create directory if it doesn't exist
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
@@ -466,7 +466,7 @@ exports.updateArticleWebsiteSettings = async (req, res) => {
 // Configure multer for website images (multiple files)
 const websiteStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = "uploads/website-images/";
+    const uploadDir = path.join(__dirname, "..", "uploads", "website-images");
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
