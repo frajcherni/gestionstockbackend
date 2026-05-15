@@ -188,6 +188,7 @@ exports.createVenteComptoire = async (req, res) => {
 
     const result = await venteRepo.save(vente);
     await queryRunner.commitTransaction();
+
     res.status(201).json({
       ...result,
       subTotal: subTotal.toFixed(3),
@@ -197,8 +198,13 @@ exports.createVenteComptoire = async (req, res) => {
       totalAfterRemise: totalAfterRemise.toFixed(3),
     });
   } catch (err) {
+    if (queryRunner.isTransactionActive) {
+      await queryRunner.rollbackTransaction();
+    }
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 
@@ -653,58 +659,70 @@ exports.getVenteComptoirePaginated = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const take = parseInt(limit);
 
-    const repo = AppDataSource.getRepository(VenteComptoire);
-    const queryBuilder = repo
-      .createQueryBuilder("vente")
+    // 1. Get paginated IDs first (to avoid collection join count issues)
+    const idQueryBuilder = repo.createQueryBuilder("vente")
+      .leftJoin("vente.client", "client")
+      .select("vente.id");
+
+    if (search) {
+      idQueryBuilder.andWhere(
+        "(vente.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+    if (status) {
+      idQueryBuilder.andWhere("vente.status = :status", { status });
+    }
+    if (startDate && endDate) {
+      idQueryBuilder.andWhere("vente.dateCommande BETWEEN :startDate AND :endDate", {
+        startDate: `${startDate} 00:00:00`,
+        endDate: `${endDate} 23:59:59`,
+      });
+    } else if (startDate) {
+      idQueryBuilder.andWhere("vente.dateCommande >= :startDate", {
+        startDate: `${startDate} 00:00:00`,
+      });
+    } else if (endDate) {
+      idQueryBuilder.andWhere("vente.dateCommande <= :endDate", {
+        endDate: `${endDate} 23:59:59`,
+      });
+    }
+
+    const totalCount = await idQueryBuilder.getCount();
+    const idResults = await idQueryBuilder
+      .orderBy("vente.dateCommande", "DESC")
+      .addOrderBy("vente.id", "DESC")
+      .skip(skip)
+      .take(take)
+      .getMany();
+
+    const ids = idResults.map(v => v.id);
+
+    if (ids.length === 0) {
+      return res.json({
+        bons: [],
+        pagination: {
+          totalCount: 0,
+          page: parseInt(page),
+          limit: take,
+          totalPages: 0,
+        },
+      });
+    }
+
+    // 2. Fetch full data for these IDs
+    const bons = await repo.createQueryBuilder("vente")
       .leftJoinAndSelect("vente.client", "client")
       .leftJoinAndSelect("vente.vendeur", "vendeur")
       .leftJoinAndSelect("vente.depot", "depot")
       .leftJoinAndSelect("vente.articles", "articles")
       .leftJoinAndSelect("articles.article", "articleDetails")
-      .leftJoinAndSelect("vente.devis", "devis");
-
-    // Search filter (number, client name, or phone)
-    if (search) {
-      queryBuilder.andWhere(
-        "(vente.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
-        { search: `%${search}%` }
-      );
-    }
-
-    // Status filter
-    if (status) {
-      queryBuilder.andWhere("vente.status = :status", { status });
-    }
-
-    // Date range filter
-    if (startDate && endDate) {
-      queryBuilder.andWhere(
-        "vente.dateCommande BETWEEN :startDate AND :endDate",
-        {
-          startDate: `${startDate} 00:00:00`,
-          endDate: `${endDate} 23:59:59`,
-        }
-      );
-    } else if (startDate) {
-      queryBuilder.andWhere("vente.dateCommande >= :startDate", {
-        startDate: `${startDate} 00:00:00`,
-      });
-    } else if (endDate) {
-      queryBuilder.andWhere("vente.dateCommande <= :endDate", {
-        endDate: `${endDate} 23:59:59`,
-      });
-    }
-
-    // Sorting
-    queryBuilder.orderBy("vente.dateCommande", "DESC");
-    queryBuilder.addOrderBy("vente.id", "DESC");
-    queryBuilder.addOrderBy("articles.id", "ASC");
-
-    // Pagination
-    const [bons, totalCount] = await queryBuilder
-      .skip(skip)
-      .take(take)
-      .getManyAndCount();
+      .leftJoinAndSelect("vente.devis", "devis")
+      .where("vente.id IN (:...ids)", { ids })
+      .orderBy("vente.dateCommande", "DESC")
+      .addOrderBy("vente.id", "DESC")
+      .addOrderBy("articles.id", "ASC")
+      .getMany();
 
     // Enhance results with calculated fields
     const enhancedBons = bons.map((vente) => {

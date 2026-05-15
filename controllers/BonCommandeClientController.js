@@ -931,45 +931,61 @@ exports.getBonsCommandeClientPaginated = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const repo = AppDataSource.getRepository(BonCommandeClient);
 
-    const queryBuilder = repo.createQueryBuilder("bon")
+    // 1. Get paginated IDs first
+    const idQb = repo.createQueryBuilder("bon")
+      .leftJoin("bon.client", "client")
+      .leftJoin("bon.clientWebsite", "clientWebsite")
+      .select("bon.id");
+
+    if (search) {
+      idQb.andWhere(
+        "(bon.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR clientWebsite.nomPrenom ILIKE :search OR clientWebsite.telephone ILIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+    if (status) {
+      idQb.andWhere("bon.status = :status", { status });
+    }
+    if (startDate) {
+      idQb.andWhere("bon.dateCommande >= :startDate", { startDate });
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      idQb.andWhere("bon.dateCommande <= :endDate", { endDate: end });
+    }
+
+    const totalCount = await idQb.getCount();
+    const idResults = await idQb
+      .orderBy("bon.dateCommande", "DESC")
+      .addOrderBy("bon.id", "DESC")
+      .skip(skip)
+      .take(parseInt(limit))
+      .getMany();
+
+    const ids = idResults.map(b => b.id);
+
+    if (ids.length === 0) {
+      return res.json({
+        bons: [],
+        pagination: { totalCount: 0, page: parseInt(page), limit: parseInt(limit), totalPages: 0 }
+      });
+    }
+
+    // 2. Fetch full data for those IDs
+    const bons = await repo.createQueryBuilder("bon")
       .leftJoinAndSelect("bon.client", "client")
       .leftJoinAndSelect("bon.vendeur", "vendeur")
       .leftJoinAndSelect("bon.depot", "depot")
       .leftJoinAndSelect("bon.articles", "articles")
       .leftJoinAndSelect("articles.article", "article")
       .leftJoinAndSelect("bon.paiements", "paiements")
-      .leftJoinAndSelect("bon.clientWebsite", "clientWebsite");
-
-    // Search filter
-    if (search) {
-      queryBuilder.andWhere(
-        "(bon.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR clientWebsite.nomPrenom ILIKE :search OR clientWebsite.telephone ILIKE :search)",
-        { search: `%${search}%` }
-      );
-    }
-
-    // Status filter
-    if (status) {
-      queryBuilder.andWhere("bon.status = :status", { status });
-    }
-
-    // Date range filter
-    if (startDate) {
-      queryBuilder.andWhere("bon.dateCommande >= :startDate", { startDate });
-    }
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      queryBuilder.andWhere("bon.dateCommande <= :endDate", { endDate: end });
-    }
-
-    queryBuilder.orderBy("bon.dateCommande", "DESC")
+      .leftJoinAndSelect("bon.clientWebsite", "clientWebsite")
+      .where("bon.id IN (:...ids)", { ids })
+      .orderBy("bon.dateCommande", "DESC")
       .addOrderBy("bon.id", "DESC")
       .addOrderBy("articles.id", "ASC")
-      .skip(skip)
-      .take(parseInt(limit));
-
-    const [bons, totalCount] = await queryBuilder.getManyAndCount();
+      .getMany();
 
     // Map to include calculated totals if needed, or rely on entity fields
     const formattedBons = bons.map(bon => {

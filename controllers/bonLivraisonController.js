@@ -1008,8 +1008,54 @@ exports.getBonLivraisonPaginated = async (req, res) => {
     const take = parseInt(limit);
 
     const repo = AppDataSource.getRepository(BonLivraison);
-    const queryBuilder = repo
-      .createQueryBuilder("bon")
+    // 1. Get paginated IDs first
+    const idQb = repo.createQueryBuilder("bon")
+      .leftJoin("bon.client", "client")
+      .select("bon.id");
+
+    if (search) {
+      idQb.andWhere(
+        "(bon.numeroLivraison ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+    if (status) {
+      idQb.andWhere("bon.status = :status", { status });
+    }
+    if (startDate && endDate) {
+      idQb.andWhere("bon.dateLivraison BETWEEN :startDate AND :endDate", {
+        startDate: `${startDate} 00:00:00`,
+        endDate: `${endDate} 23:59:59`,
+      });
+    } else if (startDate) {
+      idQb.andWhere("bon.dateLivraison >= :startDate", {
+        startDate: `${startDate} 00:00:00`,
+      });
+    } else if (endDate) {
+      idQb.andWhere("bon.dateLivraison <= :endDate", {
+        endDate: `${endDate} 23:59:59`,
+      });
+    }
+
+    const totalCount = await idQb.getCount();
+    const idResults = await idQb
+      .orderBy("bon.dateLivraison", "DESC")
+      .addOrderBy("bon.id", "DESC")
+      .skip(skip)
+      .take(take)
+      .getMany();
+
+    const ids = idResults.map(v => v.id);
+
+    if (ids.length === 0) {
+      return res.json({
+        bons: [],
+        pagination: { totalCount: 0, page: parseInt(page), limit: take, totalPages: 0 }
+      });
+    }
+
+    // 2. Fetch full data for those IDs
+    const bons = await repo.createQueryBuilder("bon")
       .leftJoinAndSelect("bon.client", "client")
       .leftJoinAndSelect("bon.vendeur", "vendeur")
       .leftJoinAndSelect("bon.depot", "depot")
@@ -1019,50 +1065,12 @@ exports.getBonLivraisonPaginated = async (req, res) => {
       .leftJoinAndSelect("bon.venteComptoire", "venteComptoire")
       .leftJoinAndSelect("bon.facture", "factureOrigin")
       .leftJoinAndSelect("bon.paiements", "paiements")
-      .leftJoinAndSelect("bon.factures", "factures");
-
-    // Search filter
-    if (search) {
-      queryBuilder.andWhere(
-        "(bon.numeroLivraison ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
-        { search: `%${search}%` }
-      );
-    }
-
-    // Status filter
-    if (status) {
-      queryBuilder.andWhere("bon.status = :status", { status });
-    }
-
-    // Date range filter
-    if (startDate && endDate) {
-      queryBuilder.andWhere(
-        "bon.dateLivraison BETWEEN :startDate AND :endDate",
-        {
-          startDate: `${startDate} 00:00:00`,
-          endDate: `${endDate} 23:59:59`,
-        }
-      );
-    } else if (startDate) {
-      queryBuilder.andWhere("bon.dateLivraison >= :startDate", {
-        startDate: `${startDate} 00:00:00`,
-      });
-    } else if (endDate) {
-      queryBuilder.andWhere("bon.dateLivraison <= :endDate", {
-        endDate: `${endDate} 23:59:59`,
-      });
-    }
-
-    // Sorting
-    queryBuilder.orderBy("bon.dateLivraison", "DESC");
-    queryBuilder.addOrderBy("bon.id", "DESC");
-    queryBuilder.addOrderBy("articles.id", "ASC");
-
-    // Pagination
-    const [bons, totalCount] = await queryBuilder
-      .skip(skip)
-      .take(take)
-      .getManyAndCount();
+      .leftJoinAndSelect("bon.factures", "factures")
+      .where("bon.id IN (:...ids)", { ids })
+      .orderBy("bon.dateLivraison", "DESC")
+      .addOrderBy("bon.id", "DESC")
+      .addOrderBy("articles.id", "ASC")
+      .getMany();
 
     res.json({
       bons,
