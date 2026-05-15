@@ -67,6 +67,11 @@ const VenteComptoire = new EntitySchema({
       cascade: true,
       eager: true,
     },
+    devis: {
+      type: "many-to-one",
+      target: "DevisClient",
+      joinColumn: { name: "devis_id" },
+    },
   },
 });
 

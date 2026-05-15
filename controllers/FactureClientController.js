@@ -188,7 +188,7 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
     // Apply search filters
     if (search) {
       qb.andWhere(
-        "(facture.numeroFacture LIKE :search OR client.raison_sociale LIKE :search OR client.designation LIKE :search)",
+        "(facture.numeroFacture ILIKE :search OR client.raison_sociale ILIKE :search OR client.designation ILIKE :search)",
         { search: `%${search}%` }
       );
     }
@@ -196,7 +196,7 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
     if (searchPhone) {
       const cleanPhone = searchPhone.replace(/\s/g, "");
       qb.andWhere(
-        "(REPLACE(client.telephone1, ' ', '') LIKE :phone OR REPLACE(client.telephone2, ' ', '') LIKE :phone)",
+        "(REPLACE(client.telephone1, ' ', '') ILIKE :phone OR REPLACE(client.telephone2, ' ', '') ILIKE :phone)",
         { phone: `%${cleanPhone}%` }
       );
     }
@@ -214,6 +214,7 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
     // Apply ordering and pagination
     qb.orderBy("facture.dateFacture", "DESC")
       .addOrderBy("facture.numeroFacture", "DESC")
+      .addOrderBy("articles.id", "ASC")
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -306,9 +307,14 @@ exports.getAllFacturesClient = async (req, res) => {
       ],
       order: {
         dateFacture: "DESC",
-        numeroFacture: "DESC",
+        id: "DESC",
       }
     });
+
+    list.forEach(v => {
+      if (v.articles) v.articles.sort((a, b) => a.id - b.id);
+    });
+
     res.json(list);
   } catch (err) {
     console.error(err);
@@ -734,6 +740,11 @@ exports.updateFactureClient = async (req, res) => {
     }
 
     const updatedFacture = await queryRunner.manager.save(FactureClient, facture);
+
+    if (updatedFacture && updatedFacture.articles) {
+      updatedFacture.articles.sort((a, b) => a.id - b.id);
+    }
+
     await queryRunner.commitTransaction();
     return res.json(updatedFacture);
   } catch (error) {
@@ -856,7 +867,7 @@ exports.getNextFactureNumber = async (req, res) => {
     // آخر Facture من نفس السنة
     const lastFacture = await repo
       .createQueryBuilder("fact")
-      .where("fact.numeroFacture LIKE :pattern", {
+      .where("fact.numeroFacture ILIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
       .orderBy("fact.id", "DESC")

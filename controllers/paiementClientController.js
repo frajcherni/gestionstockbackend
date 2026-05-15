@@ -461,7 +461,7 @@ exports.getNextPaiementNumber = async (req, res) => {
     const repo = AppDataSource.getRepository(PaiementClient);
     const lastPaiement = await repo
       .createQueryBuilder("paiement")
-      .where("paiement.numeroPaiement LIKE :pattern", {
+      .where("paiement.numeroPaiement ILIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
       .orderBy("paiement.numeroPaiement", "DESC")

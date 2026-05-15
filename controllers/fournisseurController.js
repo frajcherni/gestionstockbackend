@@ -15,7 +15,15 @@ exports.getAllFournisseurs = async (req, res) => {
 
 exports.searchFournisseurs = async (req, res) => {
   try {
-    const { query = "", page = 1, limit = 10 } = req.query;
+    const { 
+      query = "", 
+      page = 1, 
+      limit = 10,
+      status = "",
+      startDate,
+      endDate
+    } = req.query;
+    
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const take = parseInt(limit);
 
@@ -24,12 +32,23 @@ exports.searchFournisseurs = async (req, res) => {
 
     if (query) {
       queryBuilder.andWhere(
-        "(fournisseur.raison_sociale LIKE :query OR fournisseur.designation LIKE :query)",
+        "(fournisseur.raison_sociale ILIKE :query OR fournisseur.designation ILIKE :query OR fournisseur.matricule_fiscal ILIKE :query OR fournisseur.telephone1 ILIKE :query OR fournisseur.email ILIKE :query)",
         { query: `%${query}%` }
       );
     }
 
-    queryBuilder.orderBy("fournisseur.raison_sociale", "ASC");
+    if (status && status !== "Tous") {
+      queryBuilder.andWhere("fournisseur.status = :status", { status });
+    }
+
+    if (startDate && endDate) {
+      queryBuilder.andWhere("fournisseur.createdAt BETWEEN :startDate AND :endDate", {
+        startDate: `${startDate} 00:00:00`,
+        endDate: `${endDate} 23:59:59`,
+      });
+    }
+
+    queryBuilder.orderBy("fournisseur.createdAt", "DESC");
 
     const [fournisseurs, totalCount] = await queryBuilder
       .skip(skip)

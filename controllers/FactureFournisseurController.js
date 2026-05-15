@@ -402,7 +402,7 @@ exports.getNextFactureNumber = async (req, res) => {
     // Get the last numeroFacture for this year
     const lastFacture = await repo
       .createQueryBuilder("fact")
-      .where("fact.numeroFacture LIKE :pattern", {
+      .where("fact.numeroFacture ILIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
       .orderBy("fact.numeroFacture", "DESC")

@@ -579,6 +579,10 @@ exports.updateBonCommandeClient = async (req, res) => {
       relations: ["client", "vendeur", "articles", "articles.article"],
     });
 
+    if (finalBon && finalBon.articles) {
+      finalBon.articles.sort((a, b) => a.id - b.id);
+    }
+
     // ✅ RULE: Inform user if articles were modified
     let message = "Bon de commande client mis à jour avec succès";
     if (req.body.articles) {
@@ -714,7 +718,7 @@ exports.getNextCommandeNumber = async (req, res) => {
     // آخر BonCommande من نفس السنة
     const lastBon = await bonRepo
       .createQueryBuilder("bon")
-      .where("bon.numeroCommande LIKE :pattern", {
+      .where("bon.numeroCommande ILIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
       .orderBy("bon.id", "DESC")
@@ -898,9 +902,14 @@ exports.getAllBonCommandeClient = async (req, res) => {
       ],
       order: {
         dateCommande: "DESC",
-        numeroCommande: "DESC", // Correct: This should be inside an 'order' object
+        id: "DESC",
       }
     });
+
+    list.forEach(v => {
+      if (v.articles) v.articles.sort((a, b) => a.id - b.id);
+    });
+
     res.json(list);
   } catch (err) {
     console.error(err);
@@ -934,7 +943,7 @@ exports.getBonsCommandeClientPaginated = async (req, res) => {
     // Search filter
     if (search) {
       queryBuilder.andWhere(
-        "(bon.numeroCommande LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR clientWebsite.nomPrenom LIKE :search OR clientWebsite.telephone LIKE :search)",
+        "(bon.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR clientWebsite.nomPrenom ILIKE :search OR clientWebsite.telephone ILIKE :search)",
         { search: `%${search}%` }
       );
     }
@@ -956,6 +965,7 @@ exports.getBonsCommandeClientPaginated = async (req, res) => {
 
     queryBuilder.orderBy("bon.dateCommande", "DESC")
       .addOrderBy("bon.id", "DESC")
+      .addOrderBy("articles.id", "ASC")
       .skip(skip)
       .take(parseInt(limit));
 

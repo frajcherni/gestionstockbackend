@@ -189,7 +189,7 @@ exports.getNextPaymentNumber = async (req, res) => {
     // Get the last payment based on numeric part, not lexicographical
     const lastPayment = await repo
       .createQueryBuilder("payment")
-      .where("payment.numeroPaiement LIKE :pattern", {
+      .where("payment.numeroPaiement ILIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
       .orderBy("CAST(SUBSTRING(payment.numeroPaiement, 5, 4) AS INT)", "DESC") // extract number

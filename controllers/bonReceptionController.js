@@ -366,7 +366,7 @@ exports.getNextReceptionNumber = async (req, res) => {
     // Get the last numeroReception for this year
     const lastReception = await repo
       .createQueryBuilder("br")
-      .where("br.numeroReception LIKE :pattern", {
+      .where("br.numeroReception ILIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
       .orderBy("br.numeroReception", "DESC")

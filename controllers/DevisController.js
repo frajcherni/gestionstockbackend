@@ -149,6 +149,10 @@ exports.updateDevisClient = async (req, res) => {
       relations: ["client", "vendeur", "articles", "articles.article"],
     });
 
+    if (updatedDevis && updatedDevis.articles) {
+      updatedDevis.articles.sort((a, b) => a.id - b.id);
+    }
+
     res.json(updatedDevis);
   } catch (err) {
     console.error(err);
@@ -265,9 +269,14 @@ exports.getAllDevisClient = async (req, res) => {
       relations: ["client", "vendeur", "articles", "articles.article"],
       order: {
         dateCommande: "DESC",
-        numeroCommande: "DESC", // Correct: This should be inside an 'order' object
+        id: "DESC",
       },
     });
+
+    list.forEach(v => {
+      if (v.articles) v.articles.sort((a, b) => a.id - b.id);
+    });
+
     res.json(list);
   } catch (err) {
     console.error(err);
@@ -366,7 +375,7 @@ exports.getDevisPaginated = async (req, res) => {
     // Search filter
     if (search) {
       queryBuilder.andWhere(
-        "(devis.numeroCommande LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR client.telephone2 LIKE :search)",
+        "(devis.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
         { search: `%${search}%` }
       );
     }
@@ -398,6 +407,7 @@ exports.getDevisPaginated = async (req, res) => {
     // Sorting
     queryBuilder.orderBy("devis.dateCommande", "DESC");
     queryBuilder.addOrderBy("devis.id", "DESC");
+    queryBuilder.addOrderBy("articles.id", "ASC");
 
     // Pagination
     const [devis, totalCount] = await queryBuilder

@@ -7,6 +7,7 @@ const {
   VenteComptoireArticle,
 } = require("../entities/VenteComptoire");
 const { Depot } = require("../entities/Depot");
+const { DevisClient } = require("../entities/Devis"); // ✅ ADD THIS
 const { updateDepotStock } = require("../utils/stockUtils");
 
 exports.createVenteComptoire = async (req, res) => {
@@ -30,6 +31,7 @@ exports.createVenteComptoire = async (req, res) => {
       paymentMethods,
       totalPaymentAmount,
       espaceNotes,
+      devis_id, // ✅ ADD THIS
     } = req.body;
 
     const clientRepo = queryRunner.manager.getRepository(Client);
@@ -37,6 +39,7 @@ exports.createVenteComptoire = async (req, res) => {
     const articleRepo = queryRunner.manager.getRepository(Article);
     const venteRepo = queryRunner.manager.getRepository(VenteComptoire);
     const depotRepo = queryRunner.manager.getRepository(Depot);
+    const devisRepo = queryRunner.manager.getRepository(DevisClient); // ✅ USE CLASS
 
     if (!numeroCommande || !client_id || !vendeur_id || !dateCommande) {
       return res
@@ -69,6 +72,7 @@ exports.createVenteComptoire = async (req, res) => {
       paymentMethods: paymentMethods || [],
       totalPaymentAmount: parseFloat(totalPaymentAmount) || 0,
       espaceNotes: espaceNotes || null,
+      devis: devis_id ? await devisRepo.findOneBy({ id: parseInt(devis_id) }) : null,
       articles: [],
     };
 
@@ -468,6 +472,10 @@ exports.updateVenteComptoire = async (req, res) => {
       relations: ["client", "vendeur", "articles", "articles.article"],
     });
 
+    if (updatedVente && updatedVente.articles) {
+      updatedVente.articles.sort((a, b) => a.id - b.id);
+    }
+
     res.json(updatedVente);
   } catch (err) {
     await queryRunner.rollbackTransaction();
@@ -485,8 +493,12 @@ exports.getAllVenteComptoire = async (req, res) => {
       relations: ["client", "vendeur", "articles", "articles.article"],
       order: {
         dateCommande: "DESC",
-        numeroCommande: "DESC", // Correct: This should be inside an 'order' object
+        id: "DESC",
       },
+    });
+
+    list.forEach(v => {
+      if (v.articles) v.articles.sort((a, b) => a.id - b.id);
     });
 
     const enhancedList = list.map((vente) => {
@@ -648,12 +660,13 @@ exports.getVenteComptoirePaginated = async (req, res) => {
       .leftJoinAndSelect("vente.vendeur", "vendeur")
       .leftJoinAndSelect("vente.depot", "depot")
       .leftJoinAndSelect("vente.articles", "articles")
-      .leftJoinAndSelect("articles.article", "articleDetails");
+      .leftJoinAndSelect("articles.article", "articleDetails")
+      .leftJoinAndSelect("vente.devis", "devis");
 
     // Search filter (number, client name, or phone)
     if (search) {
       queryBuilder.andWhere(
-        "(vente.numeroCommande LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR client.telephone2 LIKE :search)",
+        "(vente.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
         { search: `%${search}%` }
       );
     }
@@ -685,6 +698,7 @@ exports.getVenteComptoirePaginated = async (req, res) => {
     // Sorting
     queryBuilder.orderBy("vente.dateCommande", "DESC");
     queryBuilder.addOrderBy("vente.id", "DESC");
+    queryBuilder.addOrderBy("articles.id", "ASC");
 
     // Pagination
     const [bons, totalCount] = await queryBuilder

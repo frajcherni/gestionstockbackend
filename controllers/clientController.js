@@ -162,6 +162,14 @@ exports.searchClients = async (req, res) => {
       qb.where("client.status = :status", { status });
     }
 
+    // --- Apply date range filter if provided ---
+    if (req.body.startDate && req.body.endDate) {
+      qb.andWhere("client.createdAt BETWEEN :start AND :end", {
+        start: req.body.startDate,
+        end: req.body.endDate
+      });
+    }
+
     // --- Search by multiple fields ---
     if (q !== "") {
       const searchTerm = `%${q}%`;

@@ -382,7 +382,7 @@ exports.getNextCommandeNumber = async (req, res) => {
     const repo = AppDataSource.getRepository(BonCommande);
     const lastCommande = await repo
       .createQueryBuilder("bc")
-      .where("bc.numeroCommande LIKE :pattern", {
+      .where("bc.numeroCommande ILIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
       .orderBy("bc.numeroCommande", "DESC")

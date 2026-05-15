@@ -107,6 +107,18 @@ const BonLivraison = new EntitySchema({
       target: "FactureClient",
       inverseSide: "bonLivraison",
     },
+    venteComptoire: {
+      type: "many-to-one",
+      target: "VenteComptoire",
+      nullable: true,
+      joinColumn: { name: "vente_comptoire_id" },
+    },
+    facture: {
+      type: "many-to-one",
+      target: "FactureClient",
+      nullable: true,
+      joinColumn: { name: "facture_id" },
+    },
   },
 });
 

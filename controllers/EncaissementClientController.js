@@ -347,7 +347,7 @@ exports.getNextEncaissementNumber = async (req, res) => {
     const repo = AppDataSource.getRepository(EncaissementClient);
     const lastEncaissement = await repo
       .createQueryBuilder("encaissement")
-      .where("encaissement.numeroEncaissement LIKE :pattern", {
+      .where("encaissement.numeroEncaissement ILIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
       .orderBy("encaissement.numeroEncaissement", "DESC")

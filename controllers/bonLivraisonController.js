@@ -11,6 +11,8 @@ const { Article } = require("../entities/Article");
 const { Client } = require("../entities/Client");
 const { Vendeur } = require("../entities/Vendeur");
 const { Depot } = require("../entities/Depot");
+const { VenteComptoire } = require("../entities/VenteComptoire");
+const { FactureClient } = require("../entities/FactureClient");
 const { updateDepotStock } = require("../utils/stockUtils");
 
 exports.createBonLivraison = async (req, res) => {
@@ -38,6 +40,9 @@ exports.createBonLivraison = async (req, res) => {
       totalTTCAfterRemise,
       paymentMethods,
       espaceNotes,
+      skipStockUpdate,
+      vente_comptoire_id,
+      facture_id,
     } = req.body;
 
     const clientRepo = queryRunner.manager.getRepository(Client);
@@ -50,6 +55,8 @@ exports.createBonLivraison = async (req, res) => {
       BonCommandeClientArticle
     );
     const depotRepo = queryRunner.manager.getRepository(Depot);
+    const venteRepo = queryRunner.manager.getRepository(VenteComptoire);
+    const factureRepo = queryRunner.manager.getRepository(FactureClient);
 
     const deliveryData = {
       voiture: (livraisonInfo && livraisonInfo.voiture) || null,
@@ -63,6 +70,30 @@ exports.createBonLivraison = async (req, res) => {
     let depot = null;
     let finalArticles = [];
     let bonCommandeClient = null;
+    let venteComptoire = null;
+    let facture = null;
+
+    if (facture_id) {
+      facture = await factureRepo.findOne({
+        where: { id: parseInt(facture_id) },
+        relations: ["client", "vendeur"],
+      });
+      if (facture) {
+        client = facture.client;
+        vendeur = facture.vendeur;
+      }
+    }
+
+    if (vente_comptoire_id) {
+      venteComptoire = await venteRepo.findOne({
+        where: { id: parseInt(vente_comptoire_id) },
+        relations: ["client", "vendeur"],
+      });
+      if (venteComptoire) {
+        client = venteComptoire.client;
+        vendeur = venteComptoire.vendeur;
+      }
+    }
 
     if (!articles || !Array.isArray(articles) || articles.length === 0) {
       await queryRunner.rollbackTransaction();
@@ -144,13 +175,15 @@ exports.createBonLivraison = async (req, res) => {
         }
 
         // ✅ Reduce stock for this BL delivery (DEPOT AWARE)
-        if (depot) {
-          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteSouhaiteePourCeBL);
-        } else {
-          // Fallback to global if no depot selected (though UI should prevent this)
-          article.qte -= quantiteSouhaiteePourCeBL;
-          //article.qte_physique -= quantiteSouhaiteePourCeBL;
-          await articleRepo.save(article);
+        if (!skipStockUpdate) {
+          if (depot) {
+            await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteSouhaiteePourCeBL);
+          } else {
+            // Fallback to global if no depot selected (though UI should prevent this)
+            article.qte -= quantiteSouhaiteePourCeBL;
+            //article.qte_physique -= quantiteSouhaiteePourCeBL;
+            await articleRepo.save(article);
+          }
         }
 
         // ✅ UPDATE BC article's quantiteLivree to the NEW total delivered quantity
@@ -259,12 +292,14 @@ exports.createBonLivraison = async (req, res) => {
         }
 
         // Reduce stock (DEPOT AWARE)
-        if (depot) {
-          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantitePourStock);
-        } else {
-          article.qte -= quantitePourStock;
-          //article.qte_physique -= quantitePourStock;
-          await articleRepo.save(article);
+        if (!skipStockUpdate) {
+          if (depot) {
+            await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantitePourStock);
+          } else {
+            article.qte -= quantitePourStock;
+            //article.qte_physique -= quantitePourStock;
+            await articleRepo.save(article);
+          }
         }
 
         finalArticles.push({
@@ -326,6 +361,8 @@ exports.createBonLivraison = async (req, res) => {
       depot,
       taxMode,
       bonCommandeClient: bonCommandeClient_id ? bonCommandeClient : null,
+      venteComptoire: vente_comptoire_id ? venteComptoire : null,
+      facture: facture_id ? facture : null,
       ...deliveryData,
       totalHT: parseFloat(totalHT || 0),
       totalTVA: parseFloat(totalTVA || 0),
@@ -346,6 +383,9 @@ exports.createBonLivraison = async (req, res) => {
     await queryRunner.commitTransaction();
 
     let message = "Bon de livraison créé avec succès";
+    if (skipStockUpdate) {
+      message += " (sans réduction de stock)";
+    }
     if (bonCommandeClient_id) {
       message += ` pour ${finalArticles.length} articles`;
     }
@@ -641,6 +681,10 @@ exports.updateBonLivraison = async (req, res) => {
       ],
     });
 
+    if (result && result.articles) {
+      result.articles.sort((a, b) => a.id - b.id);
+    }
+
     res.json(result);
   } catch (err) {
     await queryRunner.rollbackTransaction();
@@ -811,7 +855,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
     // آخر BonLivraison من نفس السنة
     const lastBon = await repo
       .createQueryBuilder("bon")
-      .where("bon.numeroLivraison LIKE :pattern", {
+      .where("bon.numeroLivraison ILIKE :pattern", {
         pattern: `${prefix}%/${year}`,
       })
       .orderBy("bon.id", "DESC")
@@ -908,9 +952,14 @@ exports.getAllBonLivraisons = async (req, res) => {
       ],
       order: {
         dateLivraison: "DESC",
-        numeroLivraison: "DESC ", // Correct: This should be inside an 'order' object
+        id: "DESC",
       },
     });
+
+    list.forEach(v => {
+      if (v.articles) v.articles.sort((a, b) => a.id - b.id);
+    });
+
     res.json(list);
   } catch (err) {
     console.error(err);
@@ -967,13 +1016,15 @@ exports.getBonLivraisonPaginated = async (req, res) => {
       .leftJoinAndSelect("bon.articles", "articles")
       .leftJoinAndSelect("articles.article", "articleDetails")
       .leftJoinAndSelect("bon.bonCommandeClient", "bonCommandeClient")
+      .leftJoinAndSelect("bon.venteComptoire", "venteComptoire")
+      .leftJoinAndSelect("bon.facture", "factureOrigin")
       .leftJoinAndSelect("bon.paiements", "paiements")
       .leftJoinAndSelect("bon.factures", "factures");
 
     // Search filter
     if (search) {
       queryBuilder.andWhere(
-        "(bon.numeroLivraison LIKE :search OR client.raison_sociale LIKE :search OR client.telephone1 LIKE :search OR client.telephone2 LIKE :search)",
+        "(bon.numeroLivraison ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
         { search: `%${search}%` }
       );
     }
@@ -1005,6 +1056,7 @@ exports.getBonLivraisonPaginated = async (req, res) => {
     // Sorting
     queryBuilder.orderBy("bon.dateLivraison", "DESC");
     queryBuilder.addOrderBy("bon.id", "DESC");
+    queryBuilder.addOrderBy("articles.id", "ASC");
 
     // Pagination
     const [bons, totalCount] = await queryBuilder
