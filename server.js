@@ -48,7 +48,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).send("Something broke!");
+  res.status(500).send("Oups Something broke!");
 });
 
 app.use("/api/articles", articleRoutes);
