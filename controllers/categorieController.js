@@ -15,11 +15,11 @@ const repo = AppDataSource.getRepository(Categorie);
 
 function toRelativePath(p) {
   if (!p) return null;
-  let s = p.replace(/\\/g, "/");
-  try { s = new URL(s).pathname.replace(/^\//, ""); } catch (_) {}
-  const idx = s.indexOf("uploads/");
-  return idx !== -1 ? s.slice(idx) : s;
+  const s = p.replace(/\\/g, "/");
+  const match = s.match(/uploads\/.*/i);
+  return match ? match[0] : s;
 }
+
 
 function formatCategorie(c) {
   if (!c) return c;

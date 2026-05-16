@@ -21,13 +21,11 @@ const fs = require("fs");
  */
 function toRelativePath(p) {
   if (!p) return null;
-  let s = p.replace(/\\/g, "/");
-  // Strip URL origin if it's a full URL
-  try { s = new URL(s).pathname.replace(/^\//, ""); } catch (_) {}
-  // Keep everything from 'uploads/' onwards
-  const idx = s.indexOf("uploads/");
-  return idx !== -1 ? s.slice(idx) : s;
+  const s = p.replace(/\\/g, "/");
+  const match = s.match(/uploads\/.*/i);
+  return match ? match[0] : s;
 }
+
 
 // ─────────────────────────────────────────────────────────────────
 // MULTER – saves to absolute disk path, stores relative in DB
