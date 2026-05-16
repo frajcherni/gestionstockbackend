@@ -1,4 +1,5 @@
 require("dotenv").config();
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const { AppDataSource } = require("./db");
@@ -47,12 +48,23 @@ app.use(
   })
 );
 
-const path = require("path");
+const UPLOADS_DIR = path.join(__dirname, "uploads");
+
+// Serve uploads with all required cross-origin headers
 app.use("/uploads", (req, res, next) => {
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   next();
 });
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(UPLOADS_DIR));
+
+// Debug: verify a file exists on disk
+app.get("/uploads-test", (req, res) => {
+  const file = req.query.file; // e.g. ?file=website-images/website-xxx.jpg
+  if (!file) return res.json({ uploadsDir: UPLOADS_DIR, usage: "?file=website-images/x.jpg" });
+  const abs = path.join(UPLOADS_DIR, file);
+  res.json({ abs, exists: require("fs").existsSync(abs) });
+});
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
