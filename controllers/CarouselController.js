@@ -4,8 +4,6 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-const carouselRepo = AppDataSource.getRepository(Carousel);
-
 // ─────────────────────────────────────────────────────────────────
 // IMAGE HELPERS
 // ─────────────────────────────────────────────────────────────────
@@ -25,9 +23,8 @@ function formatCarousel(c) {
   };
 }
 
-
 // ─────────────────────────────────────────────────────────────────
-// MULTER
+// MULTER CONFIG
 // ─────────────────────────────────────────────────────────────────
 const UPLOAD_ROOT = path.join(__dirname, "..", "uploads");
 
@@ -62,6 +59,7 @@ const fileToRelative = (file) => file ? toRelativePath(file.path) : null;
 
 exports.getAll = async (req, res) => {
   try {
+    const carouselRepo = AppDataSource.getRepository(Carousel);
     const slides = await carouselRepo.find({
       order: { order: "ASC" }
     });
@@ -77,6 +75,7 @@ exports.create = async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "No image uploaded" });
 
     try {
+      const carouselRepo = AppDataSource.getRepository(Carousel);
       const data = {
         image: fileToRelative(req.file),
         title: req.body.title || "",
@@ -101,8 +100,10 @@ exports.update = async (req, res) => {
     if (err) return res.status(400).json({ message: err.message });
 
     try {
+      const carouselRepo = AppDataSource.getRepository(Carousel);
       const id = parseInt(req.params.id);
       const item = await carouselRepo.findOneBy({ id });
+      
       if (!item) {
         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         return res.status(404).json({ message: "Not found" });
@@ -119,8 +120,11 @@ exports.update = async (req, res) => {
 
       if (req.file) {
         data.image = fileToRelative(req.file);
-        const oldAbs = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
-        if (oldImage && fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
+        // Standard cleanup using the same logic as Article
+        const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
+        if (oldImage && fs.existsSync(absPath)) {
+            try { fs.unlinkSync(absPath); } catch(e) {}
+        }
       }
 
       carouselRepo.merge(item, data);
@@ -135,12 +139,16 @@ exports.update = async (req, res) => {
 
 exports.remove = async (req, res) => {
   try {
+    const carouselRepo = AppDataSource.getRepository(Carousel);
     const id = parseInt(req.params.id);
     const item = await carouselRepo.findOneBy({ id });
     if (!item) return res.status(404).json({ message: "Not found" });
 
     const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(item.image));
-    if (item.image && fs.existsSync(absPath)) fs.unlinkSync(absPath);
+    if (item.image && fs.existsSync(absPath)) {
+        try { fs.unlinkSync(absPath); } catch(e) {}
+    }
+    
     await carouselRepo.remove(item);
     res.status(204).send();
   } catch (error) {

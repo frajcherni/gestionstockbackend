@@ -1,13 +1,8 @@
-
-
-
-const { AppDataSource } = require('../db');
-const { Categorie } = require('../entities/Categorie');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-
-const repo = AppDataSource.getRepository(Categorie);
+const { AppDataSource } = require("../db");
+const { Categorie } = require("../entities/Categorie");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 // ─────────────────────────────────────────────────────────────────
 // IMAGE HELPERS
@@ -28,9 +23,8 @@ function formatCategorie(c) {
   };
 }
 
-
 // ─────────────────────────────────────────────────────────────────
-// MULTER
+// MULTER CONFIG
 // ─────────────────────────────────────────────────────────────────
 const UPLOAD_ROOT = path.join(__dirname, "..", "uploads");
 
@@ -43,26 +37,20 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'category-' + uniqueSuffix + path.extname(file.originalname));
-  }
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "category-" + uniqueSuffix + path.extname(file.originalname));
+  },
 });
 
 const upload = multer({
   storage: storage,
-  fileFilter: function (req, file, cb) {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed!'), false);
-    }
-  },
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Only images are allowed"), false);
   }
 });
 
-const uploadMiddleware = upload.single('image');
+const uploadMiddleware = upload.single("image");
 const fileToRelative = (file) => file ? toRelativePath(file.path) : null;
 
 // ─────────────────────────────────────────────────────────────────
@@ -71,6 +59,7 @@ const fileToRelative = (file) => file ? toRelativePath(file.path) : null;
 
 exports.getAll = async (req, res) => {
   try {
+    const repo = AppDataSource.getRepository(Categorie);
     const onWebsite = req.query.onWebsite;
     let list;
 
@@ -106,6 +95,7 @@ exports.create = async (req, res) => {
     if (err) return res.status(400).json({ message: err.message });
 
     try {
+      const repo = AppDataSource.getRepository(Categorie);
       if (!req.body.nom) {
         if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         return res.status(400).json({ message: 'Category name is required' });
@@ -135,6 +125,7 @@ exports.update = async (req, res) => {
     if (err) return res.status(400).json({ message: err.message });
 
     try {
+      const repo = AppDataSource.getRepository(Categorie);
       const id = parseInt(req.params.id);
       let item = await repo.findOneBy({ id });
 
@@ -145,17 +136,19 @@ exports.update = async (req, res) => {
 
       const oldImage = item.image;
       const data = {
-        nom: req.body.nom,
-        description: req.body.description,
+        nom: req.body.nom !== undefined ? req.body.nom : item.nom,
+        description: req.body.description !== undefined ? req.body.description : item.description,
         parent_id: req.body.parent_id !== undefined ? (req.body.parent_id || null) : item.parent_id,
         on_website: req.body.on_website !== undefined ? (req.body.on_website === 'true' || req.body.on_website === true) : item.on_website,
-        website_order: req.body.website_order !== undefined ? (parseInt(req.body.website_order) || 0) : item.website_order
+        website_order: req.body.website_order !== undefined ? parseInt(req.body.website_order) : item.website_order
       };
 
       if (req.file) {
         data.image = fileToRelative(req.file);
-        const oldAbs = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
-        if (oldImage && fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
+        const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
+        if (oldImage && fs.existsSync(absPath)) {
+            try { fs.unlinkSync(absPath); } catch(e) {}
+        }
       }
 
       repo.merge(item, data);
@@ -170,6 +163,7 @@ exports.update = async (req, res) => {
 
 exports.remove = async (req, res) => {
   try {
+    const repo = AppDataSource.getRepository(Categorie);
     const id = parseInt(req.params.id);
     const item = await repo.findOneBy({ id });
 
@@ -177,10 +171,10 @@ exports.remove = async (req, res) => {
 
     const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(item.image));
     if (item.image && fs.existsSync(absPath)) {
-      try { fs.unlinkSync(absPath); } catch (err) { console.error("Failed to delete image file:", err); }
+        try { fs.unlinkSync(absPath); } catch(e) {}
     }
 
-    await repo.delete(id);
+    await repo.remove(item);
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ message: error.message });

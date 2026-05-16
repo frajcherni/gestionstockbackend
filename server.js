@@ -52,19 +52,35 @@ const UPLOADS_DIR = path.join(__dirname, "uploads");
 
 // Serve uploads with all required cross-origin headers
 app.use("/uploads", (req, res, next) => {
+  console.log(`📂 Image Request: ${req.url}`);
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Access-Control-Allow-Origin", "*");
   next();
 });
+
 app.use("/uploads", express.static(UPLOADS_DIR));
 
-// Debug: verify a file exists on disk
+// Debug: verify a file exists on disk and list directories
 app.get("/uploads-test", (req, res) => {
-  const file = req.query.file; // e.g. ?file=website-images/website-xxx.jpg
-  if (!file) return res.json({ uploadsDir: UPLOADS_DIR, usage: "?file=website-images/x.jpg" });
+  const file = req.query.file; 
+  const listDir = (name) => {
+    const p = path.join(UPLOADS_DIR, name);
+    return fs.existsSync(p) ? fs.readdirSync(p).slice(0, 5) : [];
+  };
+
+  if (!file) {
+    return res.json({ 
+      uploadsDir: UPLOADS_DIR, 
+      articles: listDir("articles"),
+      carousel: listDir("carousel"),
+      categories: listDir("categories"),
+      website: listDir("website-images")
+    });
+  }
   const abs = path.join(UPLOADS_DIR, file);
-  res.json({ abs, exists: require("fs").existsSync(abs) });
+  res.json({ abs, exists: fs.existsSync(abs) });
 });
+
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
