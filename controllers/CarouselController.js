@@ -120,12 +120,14 @@ exports.update = async (req, res) => {
 
       if (req.file) {
         data.image = fileToRelative(req.file);
-        // Standard cleanup using the same logic as Article
-        const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
-        if (oldImage && fs.existsSync(absPath)) {
-            try { fs.unlinkSync(absPath); } catch(e) {}
+        if (oldImage) {
+            const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
+            if (fs.existsSync(absPath)) {
+                try { fs.unlinkSync(absPath); } catch(e) {}
+            }
         }
       }
+
 
       carouselRepo.merge(item, data);
       const updated = await carouselRepo.save(item);

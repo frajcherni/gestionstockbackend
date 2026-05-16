@@ -145,11 +145,14 @@ exports.update = async (req, res) => {
 
       if (req.file) {
         data.image = fileToRelative(req.file);
-        const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
-        if (oldImage && fs.existsSync(absPath)) {
-            try { fs.unlinkSync(absPath); } catch(e) {}
+        if (oldImage) {
+            const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
+            if (fs.existsSync(absPath)) {
+                try { fs.unlinkSync(absPath); } catch(e) {}
+            }
         }
       }
+
 
       repo.merge(item, data);
       const updated = await repo.save(item);
