@@ -518,7 +518,6 @@ exports.uploadWebsiteImages = async (req, res) => {
       article.updated_at = new Date();
 
       const updatedArticle = await articleRepo.save(article);
-      const formattedImages = updatedArticle.website_images.map(toImageUrl);
 
       res.json({
         message: "Images uploaded successfully",
@@ -571,7 +570,6 @@ exports.removeWebsiteImage = async (req, res) => {
     const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(imageToRemove));
     if (fs.existsSync(absPath)) fs.unlinkSync(absPath);
 
-    const formattedImages = updatedArticle.website_images.map(toImageUrl);
 
     res.json({
       message: "Image removed successfully",
