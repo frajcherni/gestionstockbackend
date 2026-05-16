@@ -1,11 +1,8 @@
 const { AppDataSource } = require("../db");
 const { Article } = require("../entities/Article");
-
 const { Fournisseur } = require("../entities/Fournisseur");
 const { Categorie } = require("../entities/Categorie");
-
 const multer = require("multer");
-
 const path = require("path");
 const fs = require("fs");
 
@@ -14,46 +11,38 @@ const fs = require("fs");
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Extracts the relative web path from any stored value.
- * Handles:
- *   - Already relative:  "uploads/articles/x.jpg"          → "uploads/articles/x.jpg"
- *   - Absolute POSIX:    "/home/user/.../uploads/articles/x.jpg" → "uploads/articles/x.jpg"
- *   - Absolute Windows:  "C:\\...\\uploads\\articles\\x.jpg"     → "uploads/articles/x.jpg"
- *   - Full URL:          "https://royallumiere.tn/uploads/..."    → "uploads/..."
+ * Normalise any stored image value to a clean relative web path.
+ * Works regardless of what was previously stored:
+ *   "C:\\...\\uploads\\articles\\x.jpg"  →  "uploads/articles/x.jpg"
+ *   "/home/.../uploads/articles/x.jpg"  →  "uploads/articles/x.jpg"
+ *   "https://royallumiere.tn/uploads/…" →  "uploads/articles/x.jpg"
+ *   "uploads/articles/x.jpg"            →  "uploads/articles/x.jpg"  (already fine)
+ * The FRONTEND is responsible for prepending the server origin.
  */
 function toRelativePath(p) {
   if (!p) return null;
-  // Normalise backslashes
   let s = p.replace(/\\/g, "/");
-  // If it's already a full URL strip the origin
+  // Strip URL origin if it's a full URL
   try { s = new URL(s).pathname.replace(/^\//, ""); } catch (_) {}
-  // Find the 'uploads/' segment and keep everything from there
+  // Keep everything from 'uploads/' onwards
   const idx = s.indexOf("uploads/");
   return idx !== -1 ? s.slice(idx) : s;
 }
 
-/** Build an absolute public URL from whatever is stored in the DB */
-function toImageUrl(stored) {
-  if (!stored) return null;
-  const rel = toRelativePath(stored);
-  const base = (process.env.BASE_URL || "").replace(/\/+$/, "");
-  return `${base}/${rel}`;
-}
-
 // ─────────────────────────────────────────────────────────────────
-// MULTER – article main image
+// MULTER – saves to absolute disk path, stores relative in DB
 // ─────────────────────────────────────────────────────────────────
 const UPLOAD_ROOT = path.join(__dirname, "..", "uploads");
 
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(UPLOAD_ROOT, "articles");
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    cb(null, uploadDir);
+  destination: (req, file, cb) => {
+    const dir = path.join(UPLOAD_ROOT, "articles");
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
   },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, "article-" + uniqueSuffix + path.extname(file.originalname));
+  filename: (req, file, cb) => {
+    const suffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, "article-" + suffix + path.extname(file.originalname));
   },
 });
 
@@ -61,15 +50,22 @@ const upload = multer({
   storage,
   fileFilter: (req, file, cb) =>
     file.mimetype.startsWith("image/") ? cb(null, true) : cb(new Error("Only image files are allowed!"), false),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 const uploadMiddleware = upload.single("image");
 
-/** Convert req.file.path → relative path for DB storage */
-function fileToRelative(file) {
-  if (!file) return null;
-  return toRelativePath(file.path);
+/** Convert multer file → relative web path for DB */
+const fileToRelative = (file) => file ? toRelativePath(file.path) : null;
+
+/** Apply toRelativePath to article before sending – so old bad data is also fixed */
+function formatArticle(a) {
+  if (!a) return a;
+  return {
+    ...a,
+    image: toRelativePath(a.image),
+    website_images: (a.website_images || []).map(toRelativePath),
+  };
 }
 
 exports.createArticle = async (req, res) => {
@@ -180,10 +176,7 @@ exports.createArticle = async (req, res) => {
       const savedArticle = await articleRepo.save(article);
       console.log("✅ Article saved with ID:", savedArticle.id);
 
-      savedArticle.image = toImageUrl(savedArticle.image);
-      savedArticle.website_images = (savedArticle.website_images || []).map(toImageUrl);
-
-      res.status(201).json(savedArticle);
+      res.status(201).json(formatArticle(savedArticle));
     } catch (error) {
       console.error("❌ Error creating article:", error);
       if (req.file && fs.existsSync(req.file.path)) {
@@ -222,14 +215,7 @@ exports.getAllArticles = async (req, res) => {
       });
     }
 
-    // Add full URL for images
-    const articlesWithImageUrl = articles.map((article) => ({
-      ...article,
-      image: toImageUrl(article.image),
-      website_images: (article.website_images || []).map(toImageUrl),
-    }));
-
-    res.json(articlesWithImageUrl);
+    res.json(articles.map(formatArticle));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -246,11 +232,7 @@ exports.getArticleById = async (req, res) => {
       return res.status(404).json({ message: "Article not found" });
     }
 
-    // Add full URL for image
-    article.image = toImageUrl(article.image);
-    article.website_images = (article.website_images || []).map(toImageUrl);
-
-    res.json(article);
+    res.json(formatArticle(article));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -377,10 +359,7 @@ exports.updateArticle = async (req, res) => {
       }
 
       const result = await articleRepository.save(article);
-      result.image = toImageUrl(result.image);
-      result.website_images = (result.website_images || []).map(toImageUrl);
-
-      res.json(result);
+      res.json(formatArticle(result));
     } catch (error) {
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
@@ -543,11 +522,8 @@ exports.uploadWebsiteImages = async (req, res) => {
 
       res.json({
         message: "Images uploaded successfully",
-        images: newRelatives.map(toImageUrl),
-        article: {
-          ...updatedArticle,
-          website_images: formattedImages
-        },
+        images: newRelatives,
+        article: formatArticle(updatedArticle),
       });
     } catch (error) {
       // Clean up uploaded files on error
@@ -599,10 +575,7 @@ exports.removeWebsiteImage = async (req, res) => {
 
     res.json({
       message: "Image removed successfully",
-      article: {
-        ...updatedArticle,
-        website_images: formattedImages
-      },
+      article: formatArticle(updatedArticle),
     });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -700,24 +673,15 @@ exports.searchArticles = async (req, res) => {
       .limit(limitNumber)
       .getRawAndEntities();
 
-    // --- Post-processing ---
-    const articlesWithUrls = entities.map((a, index) => {
-      const result = {
-        ...a,
-        image: toImageUrl(a.image),
-        website_images: (a.website_images || []).map(toImageUrl),
-      };
-
-      // If depot_id was provided, overwrite 'qte' with the depot-specific quantity
-      if (depotId && raw[index].article_qte_depot !== undefined) {
-        result.qte = parseInt(raw[index].article_qte_depot) || 0;
-      }
-
-      return result;
-    });
-
     res.json({
-      articles: articlesWithUrls,
+      articles: entities.map((a, index) => {
+        const formatted = formatArticle(a);
+        // If depot_id was provided, overwrite 'qte' with depot-specific quantity
+        if (depotId && raw[index] && raw[index].article_qte_depot !== undefined) {
+          formatted.qte = parseInt(raw[index].article_qte_depot) || 0;
+        }
+        return formatted;
+      }),
       total,
       page: pageNumber,
       limit: limitNumber,
