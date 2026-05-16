@@ -20,7 +20,6 @@ function toRelativePath(p) {
   return match ? match[0] : s;
 }
 
-
 function formatCategorie(c) {
   if (!c) return c;
   return {
@@ -28,6 +27,7 @@ function formatCategorie(c) {
     image: toRelativePath(c.image)
   };
 }
+
 
 // ─────────────────────────────────────────────────────────────────
 // MULTER

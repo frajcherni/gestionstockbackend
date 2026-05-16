@@ -17,7 +17,6 @@ function toRelativePath(p) {
   return match ? match[0] : s;
 }
 
-
 function formatCarousel(c) {
   if (!c) return c;
   return {
@@ -25,6 +24,7 @@ function formatCarousel(c) {
     image: toRelativePath(c.image)
   };
 }
+
 
 // ─────────────────────────────────────────────────────────────────
 // MULTER
