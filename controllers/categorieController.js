@@ -9,11 +9,34 @@ const fs = require('fs');
 
 const repo = AppDataSource.getRepository(Categorie);
 
-// Configure multer storage for categories
+// ─────────────────────────────────────────────────────────────────
+// IMAGE HELPERS
+// ─────────────────────────────────────────────────────────────────
+
+function toRelativePath(p) {
+  if (!p) return null;
+  let s = p.replace(/\\/g, "/");
+  try { s = new URL(s).pathname.replace(/^\//, ""); } catch (_) {}
+  const idx = s.indexOf("uploads/");
+  return idx !== -1 ? s.slice(idx) : s;
+}
+
+function formatCategorie(c) {
+  if (!c) return c;
+  return {
+    ...c,
+    image: toRelativePath(c.image)
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MULTER
+// ─────────────────────────────────────────────────────────────────
+const UPLOAD_ROOT = path.join(__dirname, "..", "uploads");
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, "..", "uploads", "categories");
-    // Create directory if it doesn't exist
+    const uploadDir = path.join(UPLOAD_ROOT, "categories");
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -25,7 +48,6 @@ const storage = multer.diskStorage({
   }
 });
 
-// Create multer instance
 const upload = multer({
   storage: storage,
   fileFilter: function (req, file, cb) {
@@ -40,8 +62,12 @@ const upload = multer({
   }
 });
 
-// Use this for single file upload with text fields
 const uploadMiddleware = upload.single('image');
+const fileToRelative = (file) => file ? toRelativePath(file.path) : null;
+
+// ─────────────────────────────────────────────────────────────────
+// CONTROLLERS
+// ─────────────────────────────────────────────────────────────────
 
 exports.getAll = async (req, res) => {
   try {
@@ -56,7 +82,6 @@ exports.getAll = async (req, res) => {
       list = await repo.find();
     }
 
-    // Add parentName for frontend display
     const categoriesWithParentNames = list.map(cat => {
       let parentName = null;
       if (cat.parent_id) {
@@ -65,10 +90,8 @@ exports.getAll = async (req, res) => {
       }
 
       return {
-        ...cat,
-        parentName: parentName,
-        // Add full URL for images
-        image: cat.image ? `${process.env.BASE_URL || `${req.protocol}://${req.get('host')}`}/${cat.image.replace(/\\/g, "/")}` : null
+        ...formatCategorie(cat),
+        parentName: parentName
       };
     });
 
@@ -79,78 +102,48 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  // First, handle the file upload
   uploadMiddleware(req, res, async function (err) {
-    if (err) {
-      return res.status(400).json({ message: err.message });
-    }
+    if (err) return res.status(400).json({ message: err.message });
 
     try {
-
       if (!req.body.nom) {
-        // Delete uploaded file if validation fails
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
-        return res.status(400).json({
-          message: 'Category name is required'
-        });
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(400).json({ message: 'Category name is required' });
       }
 
-      // Prepare data - convert empty string to null for parent_id
       const data = {
         nom: req.body.nom,
         description: req.body.description || '',
-        parent_id: req.body.parent_id || null, // Convert empty string to null
-        image: req.file ? req.file.path : null, // Add image path if file uploaded
+        parent_id: req.body.parent_id || null,
+        image: fileToRelative(req.file),
         on_website: req.body.on_website === 'true' || req.body.on_website === true,
         website_order: parseInt(req.body.website_order) || 0
       };
 
-
       const newItem = repo.create(data);
       const saved = await repo.save(newItem);
-
-      // Add full URL for image in response
-      if (saved.image) {
-        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-        saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
-      }
-
-      res.status(201).json(saved);
+      res.status(201).json(formatCategorie(saved));
     } catch (error) {
-      // Delete uploaded file if there's an error
-      if (req.file) {
-        fs.unlinkSync(req.file.path);
-      }
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       res.status(400).json({ message: error.message });
     }
   });
 };
 
 exports.update = async (req, res) => {
-  // First, handle the file upload
   uploadMiddleware(req, res, async function (err) {
-    if (err) {
-      return res.status(400).json({ message: err.message });
-    }
+    if (err) return res.status(400).json({ message: err.message });
 
     try {
       const id = parseInt(req.params.id);
       let item = await repo.findOneBy({ id });
 
       if (!item) {
-        // Delete uploaded file if category not found
-        if (req.file) {
-          fs.unlinkSync(req.file.path);
-        }
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         return res.status(404).json({ message: 'Category not found' });
       }
 
-      // Store old image path for deletion if new image is uploaded
-      const oldImagePath = item.image;
-
-      // Prepare data - convert empty string to null for parent_id
+      const oldImage = item.image;
       const data = {
         nom: req.body.nom,
         description: req.body.description,
@@ -159,30 +152,17 @@ exports.update = async (req, res) => {
         website_order: req.body.website_order !== undefined ? (parseInt(req.body.website_order) || 0) : item.website_order
       };
 
-      // Update image if new file is uploaded
       if (req.file) {
-        data.image = req.file.path;
-        // Delete old image file
-        if (oldImagePath && fs.existsSync(oldImagePath)) {
-          fs.unlinkSync(oldImagePath);
-        }
+        data.image = fileToRelative(req.file);
+        const oldAbs = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
+        if (oldImage && fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
       }
 
       repo.merge(item, data);
       const updated = await repo.save(item);
-
-      // Add full URL for image in response
-      if (updated.image) {
-        const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
-        updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
-      }
-
-      res.json(updated);
+      res.json(formatCategorie(updated));
     } catch (error) {
-      // Delete uploaded file if there's an error
-      if (req.file) {
-        fs.unlinkSync(req.file.path);
-      }
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       res.status(400).json({ message: error.message });
     }
   });
@@ -193,24 +173,14 @@ exports.remove = async (req, res) => {
     const id = parseInt(req.params.id);
     const item = await repo.findOneBy({ id });
 
-    if (!item) {
-      return res.status(404).json({ message: 'Category not found' });
+    if (!item) return res.status(404).json({ message: 'Category not found' });
+
+    const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(item.image));
+    if (item.image && fs.existsSync(absPath)) {
+      try { fs.unlinkSync(absPath); } catch (err) { console.error("Failed to delete image file:", err); }
     }
 
-    // Delete associated image file if exists
-    if (item.image && fs.existsSync(item.image)) {
-      try {
-        fs.unlinkSync(item.image);
-      } catch (err) {
-        console.error("Failed to delete image file:", err);
-      }
-    }
-
-    const result = await repo.delete(id);
-    if (result.affected === 0) {
-      return res.status(404).json({ message: 'Category not found' });
-    }
-
+    await repo.delete(id);
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ message: error.message });

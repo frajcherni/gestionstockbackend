@@ -6,10 +6,34 @@ const fs = require("fs");
 
 const carouselRepo = AppDataSource.getRepository(Carousel);
 
-// Multer config for carousel images
+// ─────────────────────────────────────────────────────────────────
+// IMAGE HELPERS
+// ─────────────────────────────────────────────────────────────────
+
+function toRelativePath(p) {
+  if (!p) return null;
+  let s = p.replace(/\\/g, "/");
+  try { s = new URL(s).pathname.replace(/^\//, ""); } catch (_) {}
+  const idx = s.indexOf("uploads/");
+  return idx !== -1 ? s.slice(idx) : s;
+}
+
+function formatCarousel(c) {
+  if (!c) return c;
+  return {
+    ...c,
+    image: toRelativePath(c.image)
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MULTER
+// ─────────────────────────────────────────────────────────────────
+const UPLOAD_ROOT = path.join(__dirname, "..", "uploads");
+
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    const uploadDir = path.join(__dirname, "..", "uploads", "carousel");
+    const uploadDir = path.join(UPLOAD_ROOT, "carousel");
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
@@ -30,20 +54,18 @@ const upload = multer({
 });
 
 const uploadMiddleware = upload.single("image");
+const fileToRelative = (file) => file ? toRelativePath(file.path) : null;
+
+// ─────────────────────────────────────────────────────────────────
+// CONTROLLERS
+// ─────────────────────────────────────────────────────────────────
 
 exports.getAll = async (req, res) => {
   try {
     const slides = await carouselRepo.find({
       order: { order: "ASC" }
     });
-
-    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-    const formatted = slides.map(s => ({
-      ...s,
-      image: `${baseUrl}/${s.image.replace(/\\/g, "/")}`
-    }));
-
-    res.json(formatted);
+    res.json(slides.map(formatCarousel));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -56,7 +78,7 @@ exports.create = async (req, res) => {
 
     try {
       const data = {
-        image: req.file.path,
+        image: fileToRelative(req.file),
         title: req.body.title || "",
         subtitle: req.body.subtitle || "",
         link: req.body.link || "",
@@ -66,12 +88,9 @@ exports.create = async (req, res) => {
 
       const newItem = carouselRepo.create(data);
       const saved = await carouselRepo.save(newItem);
-
-      const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-      saved.image = `${baseUrl}/${saved.image.replace(/\\/g, "/")}`;
-      res.status(201).json(saved);
+      res.status(201).json(formatCarousel(saved));
     } catch (error) {
-      if (req.file) fs.unlinkSync(req.file.path);
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       res.status(500).json({ message: error.message });
     }
   });
@@ -85,7 +104,7 @@ exports.update = async (req, res) => {
       const id = parseInt(req.params.id);
       const item = await carouselRepo.findOneBy({ id });
       if (!item) {
-        if (req.file) fs.unlinkSync(req.file.path);
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         return res.status(404).json({ message: "Not found" });
       }
 
@@ -99,18 +118,16 @@ exports.update = async (req, res) => {
       };
 
       if (req.file) {
-        data.image = req.file.path;
-        if (fs.existsSync(oldImage)) fs.unlinkSync(oldImage);
+        data.image = fileToRelative(req.file);
+        const oldAbs = path.join(UPLOAD_ROOT, "..", toRelativePath(oldImage));
+        if (oldImage && fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
       }
 
       carouselRepo.merge(item, data);
       const updated = await carouselRepo.save(item);
-
-      const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
-      updated.image = `${baseUrl}/${updated.image.replace(/\\/g, "/")}`;
-      res.json(updated);
+      res.json(formatCarousel(updated));
     } catch (error) {
-      if (req.file) fs.unlinkSync(req.file.path);
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       res.status(500).json({ message: error.message });
     }
   });
@@ -122,7 +139,8 @@ exports.remove = async (req, res) => {
     const item = await carouselRepo.findOneBy({ id });
     if (!item) return res.status(404).json({ message: "Not found" });
 
-    if (fs.existsSync(item.image)) fs.unlinkSync(item.image);
+    const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(item.image));
+    if (item.image && fs.existsSync(absPath)) fs.unlinkSync(absPath);
     await carouselRepo.remove(item);
     res.status(204).send();
   } catch (error) {
