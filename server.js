@@ -27,6 +27,7 @@ const inventaireRoutes = require("./routes/inventaireRoutes");
 const depotRoutes = require("./routes/depotRoutes");
 const TransfertRoutes = require("./routes/TransfertRoutes");
 const CarouselRoutes = require("./routes/CarouselRoutes");
+const journalSortieRoutes = require("./routes/journalSortieRoutes");
 
 
 
@@ -115,6 +116,7 @@ app.use("/api/Transfert", TransfertRoutes);
 
 app.use("/api/depots", depotRoutes);
 app.use("/api/carousel", CarouselRoutes);
+app.use("/api/journal-sortie", journalSortieRoutes);
 
 
 app.get("/health", (req, res) => {

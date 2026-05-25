@@ -34,6 +34,10 @@ exports.createBonLivraison = async (req, res) => {
       articles,
       taxMode,
       livraisonInfo,
+      voiture,
+      serie,
+      chauffeur,
+      cin,
       totalHT,
       totalTVA,
       totalTTC,
@@ -59,10 +63,10 @@ exports.createBonLivraison = async (req, res) => {
     const factureRepo = queryRunner.manager.getRepository(FactureClient);
 
     const deliveryData = {
-      voiture: (livraisonInfo && livraisonInfo.voiture) || null,
-      serie: (livraisonInfo && livraisonInfo.serie) || null,
-      chauffeur: (livraisonInfo && livraisonInfo.chauffeur) || null,
-      cin: livraisonInfo?.cin || null,
+      voiture: voiture ?? livraisonInfo?.voiture ?? null,
+      serie: serie ?? livraisonInfo?.serie ?? null,
+      chauffeur: chauffeur ?? livraisonInfo?.chauffeur ?? null,
+      cin: cin ?? livraisonInfo?.cin ?? null,
     };
 
     let client = null;

@@ -47,6 +47,7 @@ const { Carousel } = require("./entities/Carousel");
 
 const {StockDepot} = require("./entities/StockDepot");
 const {Depot} = require("./entities/Depot");
+const { JournalSortieArticle } = require("./entities/JournalSortieArticle");
 
 module.exports.AppDataSource = new DataSource({
   type: "postgres",
@@ -89,7 +90,7 @@ module.exports.AppDataSource = new DataSource({
     Depot,
     Transfer,
     TransferItem,
-    Carousel
-    
+    Carousel,
+    JournalSortieArticle
   ],
 });

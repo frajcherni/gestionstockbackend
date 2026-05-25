@@ -35,6 +35,15 @@ exports.createInventaire = async (req, res) => {
         const depotEntity = await depotRepo.findOne({ where: { nom: depot } });
         if (!depotEntity) throw new Error("Dépôt introuvable");
 
+        const grouped = new Map();
+        const artTotalQte = new Map();
+        for (const a of articles) {
+            const aid = Number(a.article_id);
+            if (!grouped.has(aid)) grouped.set(aid, []);
+            grouped.get(aid).push(a);
+            artTotalQte.set(aid, (artTotalQte.get(aid) || 0) + toInt(a.qte_reel));
+        }
+
         const inv = invRepo.create({
             numero, date, date_inventaire, depot, description: description || "",
             status: "Terminé", article_count: articles.length,
@@ -43,47 +52,73 @@ exports.createInventaire = async (req, res) => {
         await invRepo.save(inv);
 
         let tHT = 0, tTVA = 0, tTTC = 0;
-        const artTotalQte = new Map();
 
-        for (const art of articles) {
-            const article = await artRepo.findOne({ where: { id: art.article_id } });
+        for (const [aid, rows] of grouped) {
+            const article = await artRepo.findOne({ where: { id: aid } });
             if (!article) continue;
 
-            const stock = await stockRepo.findOne({ where: { article_id: art.article_id, depot_id: depotEntity.id } });
-            const qte_avant = stock ? toInt(stock.qte) : 0;
-            const qte_reel = toInt(art.qte_reel);
+            const stock = await stockRepo.findOne({
+                where: { article_id: aid, depot_id: depotEntity.id },
+            });
+            const qte_avant_base = stock ? toInt(stock.qte) : 0;
+            const newTotal = toInt(artTotalQte.get(aid));
 
-            const pua_ht = parseFloat(article.pua_ht) || 0;
-            const tva_r = parseFloat(article.tva) || 19;
-            const ht = pua_ht * qte_reel;
-            const tva = ht * (tva_r / 100);
-            const ttc = ht + tva;
+            // stock_depot du dépôt inventorié = somme des qte_reel (même article en plusieurs lignes)
+            if (stock) {
+                stock.qte = newTotal;
+                await stockRepo.save(stock);
+            } else {
+                await stockRepo.save(
+                    stockRepo.create({
+                        article_id: aid,
+                        depot_id: depotEntity.id,
+                        qte: newTotal,
+                    })
+                );
+            }
 
-            tHT += ht; tTVA += tva; tTTC += ttc;
-            artTotalQte.set(art.article_id, (artTotalQte.get(art.article_id) || 0) + qte_reel);
+            for (let i = 0; i < rows.length; i++) {
+                const r = rows[i];
+                const pua_ht = parseFloat(article.pua_ht) || 0;
+                const tva_r = parseFloat(article.tva) || 19;
+                const q = toInt(r.qte_reel);
+                const ht = pua_ht * q;
+                const tva = ht * (tva_r / 100);
+                const ttc = ht + tva;
 
-            await itemRepo.save(itemRepo.create({
-                inventaire_id: inv.id,
-                article_id: art.article_id,
-                ligne_numero: Number(art.ligne_numero),
-                qte_avant, qte_reel, qte_ajustement: qte_reel - qte_avant,
-                pua_ht, pua_ttc: pua_ht * (1 + tva_r/100), tva: tva_r,
-                total_ht: ht, total_tva: tva, total_ttc: ttc
-            }));
-        }
+                tHT += ht;
+                tTVA += tva;
+                tTTC += ttc;
 
-        inv.total_ht = tHT; inv.total_tva = tTVA; inv.total_ttc = tTTC;
-        await invRepo.save(inv);
-
-        for (const [aid, qte] of artTotalQte) {
-            let s = await stockRepo.findOne({ where: { article_id: aid, depot_id: depotEntity.id } });
-            if (s) s.qte = qte;
-            else s = stockRepo.create({ article_id: aid, depot_id: depotEntity.id, qte });
-            await stockRepo.save(s);
+                await itemRepo.save(
+                    itemRepo.create({
+                        inventaire_id: inv.id,
+                        article_id: aid,
+                        ligne_numero: Number(r.ligne_numero),
+                        qte_avant: i === 0 ? qte_avant_base : 0,
+                        qte_reel: q,
+                        qte_ajustement: i === 0 ? q - qte_avant_base : q,
+                        pua_ht,
+                        pua_ttc: pua_ht * (1 + tva_r / 100),
+                        tva: tva_r,
+                        total_ht: ht,
+                        total_tva: tva,
+                        total_ttc: ttc,
+                    })
+                );
+            }
 
             const allS = await stockRepo.find({ where: { article_id: aid } });
-            await artRepo.update({ id: aid }, { qte: allS.reduce((sum, st) => sum + toInt(st.qte), 0) });
+            await artRepo.update(
+                { id: aid },
+                { qte: allS.reduce((sum, st) => sum + toInt(st.qte), 0) }
+            );
         }
+
+        inv.total_ht = tHT;
+        inv.total_tva = tTVA;
+        inv.total_ttc = tTTC;
+        await invRepo.save(inv);
 
         await queryRunner.commitTransaction();
         const resData = await invRepo.findOne({ where: { id: inv.id }, relations: ['items', 'items.article'] });

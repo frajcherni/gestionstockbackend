@@ -2,6 +2,8 @@ const { AppDataSource } = require("../db");
 const { Article } = require("../entities/Article");
 const { Fournisseur } = require("../entities/Fournisseur");
 const { Categorie } = require("../entities/Categorie");
+const { StockDepot } = require("../entities/StockDepot");
+const { Depot } = require("../entities/Depot");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -64,6 +66,46 @@ function formatArticle(a) {
     image: toRelativePath(a.image),
     website_images: (a.website_images || []).map(toRelativePath),
   };
+}
+
+const MAGAZIN_DEPOT_SQL =
+  "(LOWER(depot.nom) LIKE '%magaz%' OR LOWER(depot.nom) LIKE '%magasin%')";
+
+/** Quantité stock_depot pour dépôts dont le nom contient magazin/magasin */
+async function getMagazinQteByArticleIds(articleIds) {
+  if (!articleIds.length) return {};
+  const stockRepo = AppDataSource.getRepository(StockDepot);
+  const rows = await stockRepo
+    .createQueryBuilder("sd")
+    .innerJoin("sd.depot", "depot")
+    .select("sd.article_id", "article_id")
+    .addSelect("COALESCE(SUM(sd.qte), 0)", "qte_magazin")
+    .where("sd.article_id IN (:...ids)", { ids: articleIds })
+    .andWhere(MAGAZIN_DEPOT_SQL)
+    .groupBy("sd.article_id")
+    .getRawMany();
+
+  const map = {};
+  for (const r of rows) {
+    map[parseInt(r.article_id, 10)] = parseInt(r.qte_magazin, 10) || 0;
+  }
+  return map;
+}
+
+/** Stock par dépôt pour un article (tous les dépôts, 0 si pas de ligne stock_depot) */
+async function getStocksParDepotForArticle(articleId) {
+  const depotRepo = AppDataSource.getRepository(Depot);
+  const stockRepo = AppDataSource.getRepository(StockDepot);
+  const [depots, stocks] = await Promise.all([
+    depotRepo.find({ order: { nom: "ASC" } }),
+    stockRepo.find({ where: { article_id: articleId } }),
+  ]);
+  const byDepotId = Object.fromEntries(stocks.map((s) => [s.depot_id, s.qte]));
+  return depots.map((d) => ({
+    depot_id: d.id,
+    depot_nom: d.nom,
+    qte: parseInt(byDepotId[d.id], 10) || 0,
+  }));
 }
 
 exports.createArticle = async (req, res) => {
@@ -230,7 +272,13 @@ exports.getArticleById = async (req, res) => {
       return res.status(404).json({ message: "Article not found" });
     }
 
-    res.json(formatArticle(article));
+    const stocks_par_depot = await getStocksParDepotForArticle(article.id);
+    const magazinMap = await getMagazinQteByArticleIds([article.id]);
+    const formatted = formatArticle(article);
+    formatted.stocks_par_depot = stocks_par_depot;
+    formatted.qte_magazin = magazinMap[article.id] ?? 0;
+
+    res.json(formatted);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -669,12 +717,17 @@ exports.searchArticles = async (req, res) => {
       .limit(limitNumber)
       .getRawAndEntities();
 
+    const articleIds = entities.map((a) => a.id);
+    const magazinQteMap = depotId ? {} : await getMagazinQteByArticleIds(articleIds);
+
     res.json({
       articles: entities.map((a, index) => {
         const formatted = formatArticle(a);
         // If depot_id was provided, overwrite 'qte' with depot-specific quantity
         if (depotId && raw[index] && raw[index].article_qte_depot !== undefined) {
           formatted.qte = parseInt(raw[index].article_qte_depot) || 0;
+        } else if (!depotId) {
+          formatted.qte_magazin = magazinQteMap[a.id] ?? 0;
         }
         return formatted;
       }),

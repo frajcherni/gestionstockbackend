@@ -10,6 +10,15 @@ const { Depot } = require("../entities/Depot");
 const { DevisClient } = require("../entities/Devis"); // ✅ ADD THIS
 const { updateDepotStock } = require("../utils/stockUtils");
 
+/** Dépôt magazin par défaut quand le frontend n'envoie pas depot_id */
+const DEFAULT_MAGAZIN_DEPOT_ID = 1;
+
+const resolveDepotId = (depot_id) => {
+  const parsed = parseInt(depot_id, 10);
+  if (!isNaN(parsed) && parsed > 0) return parsed;
+  return DEFAULT_MAGAZIN_DEPOT_ID;
+};
+
 exports.createVenteComptoire = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
   await queryRunner.connect();
@@ -66,7 +75,7 @@ exports.createVenteComptoire = async (req, res) => {
       notes: notes || null,
       client,
       vendeur,
-      depot: depot_id ? await depotRepo.findOneBy({ id: parseInt(depot_id) }) : null,
+      depot: await depotRepo.findOneBy({ id: resolveDepotId(depot_id) }),
       taxMode,
       // ✅ ADD PAYMENT DATA
       paymentMethods: paymentMethods || [],
@@ -168,9 +177,20 @@ exports.createVenteComptoire = async (req, res) => {
       };
       vente.articles.push(venteArticle);
 
-      // ✅ REDUCE STOCK (DEPOT AWARE)
+      // ✅ REDUCE STOCK (DEPOT AWARE) + journal sortie
       if (vente.depot) {
-        await updateDepotStock(queryRunner.manager, article.id, vente.depot.id, -quantite);
+        await updateDepotStock(
+          queryRunner.manager,
+          article.id,
+          vente.depot.id,
+          -quantite,
+          {
+            typeDocument: "vente_comptoire",
+            documentId: null,
+            numeroDocument: numeroCommande,
+            dateSortie: dateCommande,
+          }
+        );
       } else {
         article.qte -= quantite;
         article.qte_physique -= quantite;
@@ -345,15 +365,18 @@ exports.updateVenteComptoire = async (req, res) => {
       updates.vendeur = vendeur;
     }
 
-    if (req.body.depot_id) {
+    if (req.body.depot_id !== undefined && req.body.depot_id !== null && req.body.depot_id !== "") {
       const depot = await depotRepo.findOneBy({
-        id: parseInt(req.body.depot_id),
+        id: resolveDepotId(req.body.depot_id),
       });
       if (!depot) {
         await queryRunner.rollbackTransaction();
         return res.status(404).json({ message: "Dépôt non trouvé" });
       }
       updates.depot = depot;
+    } else if (!vente.depot) {
+      const defaultDepot = await depotRepo.findOneBy({ id: DEFAULT_MAGAZIN_DEPOT_ID });
+      if (defaultDepot) updates.depot = defaultDepot;
     }
 
     // --- Apply updates to parent record ---
@@ -363,7 +386,18 @@ exports.updateVenteComptoire = async (req, res) => {
     if (req.body.articles && Array.isArray(req.body.articles)) {
       for (const oldItem of vente.articles) {
         if (vente.depot) {
-          await updateDepotStock(queryRunner.manager, oldItem.article.id, vente.depot.id, oldItem.quantite);
+          await updateDepotStock(
+            queryRunner.manager,
+            oldItem.article.id,
+            vente.depot.id,
+            oldItem.quantite,
+            {
+              typeDocument: "vente_comptoire",
+              documentId: vente.id,
+              numeroDocument: vente.numeroCommande,
+              commentaire: "restauration_stock_update",
+            }
+          );
         } else {
           const articleEntity = await articleRepo.findOneBy({ id: oldItem.article.id });
           if (articleEntity) {
@@ -463,7 +497,18 @@ exports.updateVenteComptoire = async (req, res) => {
         // --- Reduce stock for new/updated articles (DEPOT AWARE) ---
         const currentDepot = updates.depot || vente.depot;
         if (currentDepot) {
-          await updateDepotStock(queryRunner.manager, article.id, currentDepot.id, -parseInt(item.quantite));
+          await updateDepotStock(
+            queryRunner.manager,
+            article.id,
+            currentDepot.id,
+            -parseInt(item.quantite),
+            {
+              typeDocument: "vente_comptoire",
+              documentId: vente.id,
+              numeroDocument: vente.numeroCommande,
+              dateSortie: req.body.dateCommande || vente.dateCommande,
+            }
+          );
         } else {
           article.qte = (article.qte || 0) - parseInt(item.quantite);
           article.qte_physique = (article.qte_physique || 0) - parseInt(item.quantite);
@@ -571,7 +616,18 @@ exports.deleteVenteComptoire = async (req, res) => {
     // --- Restore stock (DEPOT AWARE) ---
     for (const item of vente.articles) {
       if (vente.depot) {
-        await updateDepotStock(queryRunner.manager, item.article.id, vente.depot.id, item.quantite);
+        await updateDepotStock(
+          queryRunner.manager,
+          item.article.id,
+          vente.depot.id,
+          item.quantite,
+          {
+            typeDocument: "vente_comptoire",
+            documentId: vente.id,
+            numeroDocument: vente.numeroCommande,
+            commentaire: "annulation_suppression_vente",
+          }
+        );
       } else {
         const articleEntity = await articleRepo.findOneBy({ id: item.article.id });
         if (articleEntity) {
