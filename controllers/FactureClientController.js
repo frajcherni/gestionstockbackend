@@ -580,7 +580,12 @@ exports.createFactureClient = async (req, res) => {
             const toReduce = Math.max(0, invoicedQty - alreadyDelivered);
 
             if (toReduce > 0) {
-              await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -toReduce);
+              await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -toReduce, {
+                typeDocument: 'facture_client',
+                documentId: null,
+                numeroDocument: numeroFacture,
+                dateSortie: dateFacture,
+              });
             }
 
             // Update BC's delivered quantity to reflect this invoice
@@ -588,11 +593,21 @@ exports.createFactureClient = async (req, res) => {
             await bcArticleRepo.save(bcArticle);
           } else {
             // Article not in original BC? Treat as direct
-            await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+            await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite), {
+              typeDocument: 'facture_client',
+              documentId: null,
+              numeroDocument: numeroFacture,
+              dateSortie: dateFacture,
+            });
           }
         } else {
           // Direct Facture (no BC, no BL, no VC)
-          await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+          await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite), {
+            typeDocument: 'facture_client',
+            documentId: null,
+            numeroDocument: numeroFacture,
+            dateSortie: dateFacture,
+          });
         }
       }
     }
@@ -736,15 +751,30 @@ exports.updateFactureClient = async (req, res) => {
               const toReduce = Math.max(0, invoicedQty - alreadyDelivered);
 
               if (toReduce > 0) {
-                await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -toReduce);
+                await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -toReduce, {
+                  typeDocument: 'facture_client',
+                  documentId: parseInt(id),
+                  numeroDocument: facture.numeroFacture,
+                  dateSortie: facture.dateFacture,
+                });
               }
               bcArticle.quantiteLivree = (bcArticle.quantiteLivree || 0) + invoicedQty;
               await bcArticleRepo.save(bcArticle);
             } else {
-              await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+              await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite), {
+                typeDocument: 'facture_client',
+                documentId: parseInt(id),
+                numeroDocument: facture.numeroFacture,
+                dateSortie: facture.dateFacture,
+              });
             }
           } else {
-            await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite));
+            await updateDepotStock(queryRunner.manager, articleEntity.id, facture.depot.id, -parseInt(item.quantite), {
+              typeDocument: 'facture_client',
+              documentId: parseInt(id),
+              numeroDocument: facture.numeroFacture,
+              dateSortie: facture.dateFacture,
+            });
           }
         }
       }

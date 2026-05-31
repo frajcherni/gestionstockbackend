@@ -631,6 +631,8 @@ exports.searchArticles = async (req, res) => {
   try {
     // --- Read body parameters ---
     const q = typeof req.body.q === "string" ? req.body.q.trim() : "";
+    const reference =
+      typeof req.body.reference === "string" ? req.body.reference.trim() : "";
 
     // --- Optional pagination (safe defaults) ---
     let pageNumber = parseInt(req.body.page, 10);
@@ -695,7 +697,13 @@ exports.searchArticles = async (req, res) => {
       qb.andWhere("article.createdAt <= :end", { end: req.body.endDate });
     }
 
-    // Enhanced search condition (Reference, Designation, Nom, Category, Supplier)
+    if (reference !== "") {
+      qb.andWhere("article.reference ILIKE :reference", {
+        reference: `%${reference}%`,
+      });
+    }
+
+    // Enhanced search condition (Designation, Nom, Category, Supplier)
     if (q !== "") {
       qb.andWhere(
         "(article.reference ILIKE :term OR article.designation ILIKE :term OR article.nom ILIKE :term OR categorie.nom ILIKE :term OR fournisseur.raison_sociale ILIKE :term)",

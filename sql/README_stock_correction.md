@@ -22,7 +22,7 @@
 |---|---------|--------|
 | 0 | `00_check_ventes_sans_depot.sql` | **Lecture seule** — ventes sans `depot_id` |
 | 1 | `01_backfill_journal_historique.sql` | Remplir le journal (magazin) |
-| **4** | **`04_magazin_init_inventaire_then_sorties.sql`** | **Recommandé** : inventaire (SUM) → stock magazin → − sorties journal |
+| **4** | **`04_magazin_init_inventaire_then_sorties.sql`** | **Recommandé** : inventaire **`INVENTAIRE-2025-089`** (SUM) → stock magazin → − **toutes** sorties journal (sans filtre date) |
 | 2 | `02_sync_stock_from_inventaire_magazin.sql` | Seulement poser inventaire sur `stock_depot` |
 | 3 | `03_apply_sorties_to_stock_magazin.sql` | Seulement déduire sorties journal magazin |
 
@@ -30,9 +30,12 @@
 
 ```
 stock_depot[article, magazin] =
-  SUM(qte_reel inventaire dernier magazin)
-  − SUM(quantite journal_sortie WHERE depot_id = magazin)
+  SUM(qte_reel) dans inventaire numero INVENTAIRE-2025-089
+  − SUM(quantite journal_sortie WHERE depot_id = magazin)  -- historique complet
+  (quantités négatives autorisées, ex. −43)
 ```
+
+Ne pas choisir l'inventaire par `date_inventaire` (dates parfois corrigées après coup).
 
 ## Ventes sans dépôt
 

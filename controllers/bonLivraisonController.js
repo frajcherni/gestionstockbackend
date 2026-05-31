@@ -181,7 +181,12 @@ exports.createBonLivraison = async (req, res) => {
         // ✅ Reduce stock for this BL delivery (DEPOT AWARE)
         if (!skipStockUpdate) {
           if (depot) {
-            await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteSouhaiteePourCeBL);
+            await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteSouhaiteePourCeBL, {
+              typeDocument: 'bon_livraison',
+              documentId: null,
+              numeroDocument: numeroLivraison,
+              dateSortie: dateLivraison,
+            });
           } else {
             // Fallback to global if no depot selected (though UI should prevent this)
             article.qte -= quantiteSouhaiteePourCeBL;
@@ -298,7 +303,12 @@ exports.createBonLivraison = async (req, res) => {
         // Reduce stock (DEPOT AWARE)
         if (!skipStockUpdate) {
           if (depot) {
-            await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantitePourStock);
+            await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantitePourStock, {
+              typeDocument: 'bon_livraison',
+              documentId: null,
+              numeroDocument: numeroLivraison,
+              dateSortie: dateLivraison,
+            });
           } else {
             article.qte -= quantitePourStock;
             //article.qte_physique -= quantitePourStock;
@@ -624,7 +634,12 @@ exports.updateBonLivraison = async (req, res) => {
           // Update stock (DEPOT AWARE) ONLY if it's considered delivered
           if (isNowDelivered) {
             if (bon.depot) {
-              await updateDepotStock(queryRunner.manager, article.id, bon.depot.id, -quantite);
+              await updateDepotStock(queryRunner.manager, article.id, bon.depot.id, -quantite, {
+                typeDocument: 'bon_livraison',
+                documentId: bon.id,
+                numeroDocument: bon.numeroLivraison,
+                dateSortie: dateLivraison || bon.dateLivraison,
+              });
             } else {
               article.qte = (article.qte || 0) - quantite;
               article.qte_physique = (article.qte_physique || 0) - quantite;

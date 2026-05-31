@@ -205,7 +205,12 @@ exports.createBonCommandeClient = async (req, res) => {
       // ✅ REDUCE STOCK (qte_sortie) if quantiteLivree > 0 — depot-aware
       if (quantiteLivree > 0) {
         if (depot) {
-          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteLivree);
+          await updateDepotStock(queryRunner.manager, article.id, depot.id, -quantiteLivree, {
+            typeDocument: 'bon_commande_client',
+            documentId: null,
+            numeroDocument: numeroCommande,
+            dateSortie: dateCommande,
+          });
         } else {
           // Fallback: update global stock when no depot is set
           article.qte -= quantiteLivree;
@@ -222,6 +227,7 @@ exports.createBonCommandeClient = async (req, res) => {
         designation: item.designation || article.designation || '', // ADD THIS LINE
         quantite: quantite,
         quantiteLivree: quantiteLivree, // ✅ Store the initial delivered quantity
+        quantiteLivreeDirecte: quantiteLivree, // ✅ Store the initial direct delivered quantity
         prixUnitaire,
         prix_ttc: prix_ttc,
         tva: tvaRate,
@@ -472,7 +478,12 @@ exports.updateBonCommandeClient = async (req, res) => {
               : bon.depot) || null;
 
             if (currentDepot) {
-              await updateDepotStock(queryRunner.manager, existingItem.article.id, currentDepot.id, -deliveryDiff);
+              await updateDepotStock(queryRunner.manager, existingItem.article.id, currentDepot.id, -deliveryDiff, {
+                typeDocument: 'bon_commande_client',
+                documentId: bon.id,
+                numeroDocument: bon.numeroCommande,
+                dateSortie: req.body.dateCommande || bon.dateCommande,
+              });
             } else {
               const article = await articleRepo.findOneBy({ id: existingItem.article.id });
               if (article) {
@@ -499,6 +510,7 @@ exports.updateBonCommandeClient = async (req, res) => {
           await bonArticleRepo.update(existingItem.id, {
             quantite: parseInt(newItem.quantite),
             quantiteLivree: newQuantiteLivree,
+            quantiteLivreeDirecte: newQuantiteLivree,
             prixUnitaire: prixUnitaire,
             prix_ttc: prixUnitaire * (1 + tvaRate / 100),
             tva: tvaRate,
@@ -546,7 +558,12 @@ exports.updateBonCommandeClient = async (req, res) => {
               : bon.depot) || null;
 
             if (currentDepot) {
-              await updateDepotStock(queryRunner.manager, article.id, currentDepot.id, -quantiteLivree);
+              await updateDepotStock(queryRunner.manager, article.id, currentDepot.id, -quantiteLivree, {
+                typeDocument: 'bon_commande_client',
+                documentId: bon.id,
+                numeroDocument: bon.numeroCommande,
+                dateSortie: req.body.dateCommande || bon.dateCommande,
+              });
             } else {
               article.qte -= quantiteLivree;
               article.qte_physique -= quantiteLivree;
@@ -559,6 +576,7 @@ exports.updateBonCommandeClient = async (req, res) => {
             article: article,
             quantite: parseInt(newItem.quantite),
             quantiteLivree: quantiteLivree,
+            quantiteLivreeDirecte: quantiteLivree,
             prixUnitaire: prixUnitaire,
             prix_ttc: prix_ttc, // UPDATE THIS LINE - use the prix_ttc variable
             tva: tvaRate,

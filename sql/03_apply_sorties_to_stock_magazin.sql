@@ -21,7 +21,7 @@ sorties_par_article AS (
 )
 
 UPDATE stock_depot sd
-SET qte = GREATEST(0, sd.qte - spa.total_sortie),
+SET qte = sd.qte - spa.total_sortie,
     updated_at = CURRENT_TIMESTAMP
 FROM sorties_par_article spa, mag_depot md
 WHERE sd.article_id = spa.article_id

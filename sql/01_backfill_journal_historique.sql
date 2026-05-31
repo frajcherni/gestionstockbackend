@@ -54,14 +54,14 @@ WHERE bl.depot_id IN (SELECT id FROM mag_depot)
   AND bl.vente_comptoire_id IS NULL
   AND bl.status IN ('Livré', 'Partiellement Livré');
 
--- 3) Factures client directes (sans BL ni VC)
+-- 3) Factures client (directes, ou liées à un BC sans BL pour la quantité facturée restante)
 INSERT INTO journal_sortie_articles (
   article_id, depot_id, quantite, date_sortie, type_document, document_id, numero_document, commentaire
 )
 SELECT
   fca.article_id,
   fc.depot_id,
-  fca.quantite,
+  fca.quantite - COALESCE(bcca."quantiteLivreeDirecte", 0),
   DATE(fc."dateFacture"),
   'facture_client',
   fc.id,
@@ -69,20 +69,21 @@ SELECT
   'backfill_historique'
 FROM factures_client_articles fca
 INNER JOIN factures_client fc ON fc.id = fca.facture_client_id
+LEFT JOIN bon_commande_client_articles bcca ON bcca.bon_commande_client_id = fc."bonCommandeClient_id" AND bcca.article_id = fca.article_id
 WHERE fc.depot_id IN (SELECT id FROM mag_depot)
-  AND fca.quantite > 0
+  AND (fca.quantite - COALESCE(bcca."quantiteLivreeDirecte", 0)) > 0
   AND fc.vente_comptoire_id IS NULL
   AND fc.bon_livraison_id IS NULL
   AND fc.status != 'Annulee';
 
--- 4) BC avec livraison directe (sans BL créé)
+-- 4) BC avec livraison directe (via quantiteLivreeDirecte)
 INSERT INTO journal_sortie_articles (
   article_id, depot_id, quantite, date_sortie, type_document, document_id, numero_document, commentaire
 )
 SELECT
   bcca.article_id,
   bcc.depot_id,
-  bcca."quantiteLivree",
+  bcca."quantiteLivreeDirecte",
   DATE(bcc."dateCommande"),
   'bon_commande_client',
   bcc.id,
@@ -91,10 +92,7 @@ SELECT
 FROM bon_commande_client_articles bcca
 INNER JOIN bon_commande_clients bcc ON bcc.id = bcca.bon_commande_client_id
 WHERE bcc.depot_id IN (SELECT id FROM mag_depot)
-  AND bcca."quantiteLivree" > 0
-  AND NOT EXISTS (
-    SELECT 1 FROM bon_livraisons bl WHERE bl.bon_commande_client_id = bcc.id
-  );
+  AND bcca."quantiteLivreeDirecte" > 0;
 
 COMMIT;
 
