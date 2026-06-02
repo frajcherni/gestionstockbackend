@@ -9,11 +9,40 @@ const toInt = (v) => { const n = Math.round(parseFloat(v)); return isNaN(n) ? 0 
 
 exports.getAllInventaires = async (req, res) => {
     try {
-        const inventaires = await AppDataSource.getRepository(Inventaire).find({
-            relations: ['items', 'items.article'],
-            order: { created_at: 'DESC' }
-        });
-        res.status(200).json({ success: true, data: inventaires });
+        // Check if pagination parameters are provided
+        const page = parseInt(req.query.page) || null;
+        const limit = parseInt(req.query.limit) || null;
+
+        const repo = AppDataSource.getRepository(Inventaire);
+
+        if (page !== null && limit !== null && page > 0 && limit > 0) {
+            // Paginated query
+            const skip = (page - 1) * limit;
+            const [inventaires, total] = await repo.findAndCount({
+                relations: ['items', 'items.article'],
+                order: { created_at: 'DESC' },
+                skip,
+                take: limit
+            });
+            
+            return res.status(200).json({
+                success: true,
+                data: {
+                    data: inventaires,
+                    total,
+                    page,
+                    limit,
+                    pages: Math.ceil(total / limit)
+                }
+            });
+        } else {
+            // Non-paginated query (backward compatibility)
+            const inventaires = await repo.find({
+                relations: ['items', 'items.article'],
+                order: { created_at: 'DESC' }
+            });
+            res.status(200).json({ success: true, data: inventaires });
+        }
     } catch (e) {
         res.status(500).json({ success: false, message: e.message });
     }
