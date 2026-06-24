@@ -868,7 +868,7 @@ exports.annulerBonLivraison = async (req, res) => {
 exports.getNextLivraisonNumber = async (req, res) => {
   try {
     const year = new Date().getFullYear();
-    const prefix = "LIVRAISON-";
+    const prefix = "BON DE LIVRAISON-";
     const repo = AppDataSource.getRepository(BonLivraison);
 
     // آخر BonLivraison من نفس السنة
@@ -883,7 +883,7 @@ exports.getNextLivraisonNumber = async (req, res) => {
     let nextSeq = 1;
 
     if (lastBon && lastBon.numeroLivraison) {
-      // الصيغة: LIVRAISON-001/2026
+      // الصيغة: BON DE LIVRAISON-001/2026
       const [livraisonPart, yearPart] = lastBon.numeroLivraison.split("/");
       const lastYear = parseInt(yearPart, 10);
 
