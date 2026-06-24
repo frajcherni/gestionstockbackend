@@ -871,30 +871,29 @@ exports.getNextLivraisonNumber = async (req, res) => {
     const prefix = "BON DE LIVRAISON-";
     const repo = AppDataSource.getRepository(BonLivraison);
 
-    // آخر BonLivraison من نفس السنة
-    const lastBon = await repo
+    // Récupère tous les bons de l'année courante, quel que soit l'ancien préfixe
+    // (LIVRAISON-, BON LIVRAISON-, BON DE LIVRAISON-, ...)
+    const bons = await repo
       .createQueryBuilder("bon")
-      .where("bon.numeroLivraison ILIKE :pattern", {
-        pattern: `${prefix}%/${year}`,
-      })
-      .orderBy("bon.id", "DESC")
-      .getOne();
+      .where("bon.numeroLivraison LIKE :pattern", { pattern: `%/${year}` })
+      .getMany();
 
-    let nextSeq = 1;
-
-    if (lastBon && lastBon.numeroLivraison) {
-      // الصيغة: BON DE LIVRAISON-001/2026
-      const [livraisonPart, yearPart] = lastBon.numeroLivraison.split("/");
-      const lastYear = parseInt(yearPart, 10);
-
-      if (lastYear === year) {
-        const lastSeq = parseInt(livraisonPart.split("-")[1], 10);
-        nextSeq = lastSeq + 1;
+    // Trouve la plus grande séquence déjà utilisée cette année
+    let maxSeq = 0;
+    for (const bon of bons) {
+      if (!bon.numeroLivraison) continue;
+      // Extrait les chiffres juste avant "/<année>"  -> ex: "...-167/2026"
+      const match = bon.numeroLivraison.match(/(\d+)\s*\/\s*(\d{4})\s*$/);
+      if (match && parseInt(match[2], 10) === year) {
+        const seq = parseInt(match[1], 10);
+        if (seq > maxSeq) maxSeq = seq;
       }
     }
 
+    let nextSeq = maxSeq + 1;
     let nextLivraisonNumber;
 
+    // Garantit l'unicité du numéro généré
     while (true) {
       nextLivraisonNumber = `${prefix}${String(nextSeq).padStart(
         3,
