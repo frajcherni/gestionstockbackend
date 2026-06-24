@@ -1081,6 +1081,7 @@ exports.getBonLivraisonPaginated = async (req, res) => {
       .leftJoinAndSelect("bon.articles", "articles")
       .leftJoinAndSelect("articles.article", "articleDetails")
       .leftJoinAndSelect("bon.bonCommandeClient", "bonCommandeClient")
+      .leftJoinAndSelect("bonCommandeClient.paiements", "bcPaiements")
       .leftJoinAndSelect("bon.venteComptoire", "venteComptoire")
       .leftJoinAndSelect("bon.facture", "factureOrigin")
       .leftJoinAndSelect("bon.paiements", "paiements")

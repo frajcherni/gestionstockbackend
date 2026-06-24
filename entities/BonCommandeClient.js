@@ -10,7 +10,7 @@ const BonCommandeClient = new EntitySchema({
     dateLivBonCommande: { type: "timestamp", nullable: true },
     status: {
       type: "enum",
-      enum: ["Brouillon", "Confirme", "Livre", "Partiellement Livre", "Annule"],
+      enum: ["En Attente", "Brouillon", "Confirme", "Livre", "Partiellement Livre", "Annule"],
       default: "Confirme",
     },
 

@@ -386,7 +386,7 @@ exports.createFactureClient = async (req, res) => {
       remiseType,
       montantPaye,
       exoneration,
-      boncommandeclientid, // This is coming from req.body
+      bonCommandeClient_id,
       venteComptoire_id, // ADD THIS: For vente comptoire reference
       paymentMethods = [],
       totalPaymentAmount = 0,
@@ -413,7 +413,7 @@ exports.createFactureClient = async (req, res) => {
         .json({ message: "Les champs obligatoires sont manquants" });
     }
 
-    console.log("boncommandeclientid:", boncommandeclientid);
+    console.log("bonCommandeClient_id:", bonCommandeClient_id);
     console.log("venteComptoire_id:", venteComptoire_id); // ADD THIS: Debug log
 
     // Check if numeroFacture is unique
@@ -435,9 +435,9 @@ exports.createFactureClient = async (req, res) => {
 
     // Check if bonCommandeClient exists
     let bonCommandeClient = null;
-    if (boncommandeclientid) {
+    if (bonCommandeClient_id) {
       bonCommandeClient = await bonCommandeClientRepo.findOne({
-        where: { id: parseInt(boncommandeclientid) },
+        where: { id: parseInt(bonCommandeClient_id) },
         relations: ["articles", "articles.article"],
       });
       if (!bonCommandeClient) {

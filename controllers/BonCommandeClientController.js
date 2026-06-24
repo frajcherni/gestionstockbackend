@@ -137,7 +137,7 @@ exports.createBonCommandeClient = async (req, res) => {
       dateCommande: new Date(dateCommande),
       dateLivBonCommande: dateLivBonCommande ? new Date(dateLivBonCommande) : null,
 
-      status: "Confirme",
+      status: clientWebsiteInfo ? "En Attente" : "Confirme",
       remise: remise || 0,
       remiseType: remiseType,
       notes: notes || null,

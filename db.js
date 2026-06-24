@@ -44,6 +44,9 @@ const { PaiementClient } = require("./entities/PaiementClient");
 const {Inventaire, InventaireItem} = require("./entities/Inventaire");
 const { Transfer, TransferItem } = require("./entities/Transfer");
 const { Carousel } = require("./entities/Carousel");
+const { Promo } = require("./entities/Promo");
+const { Brand } = require("./entities/Brand");
+const { Testimonial } = require("./entities/Testimonial");
 
 const {StockDepot} = require("./entities/StockDepot");
 const {Depot} = require("./entities/Depot");
@@ -91,6 +94,9 @@ module.exports.AppDataSource = new DataSource({
     Transfer,
     TransferItem,
     Carousel,
+    Promo,
+    Brand,
+    Testimonial,
     JournalSortieArticle
   ],
 });
