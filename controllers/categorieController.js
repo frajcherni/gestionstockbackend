@@ -61,26 +61,35 @@ exports.getAll = async (req, res) => {
   try {
     const repo = AppDataSource.getRepository(Categorie);
     const onWebsite = req.query.onWebsite;
-    let list;
 
-    if (onWebsite !== undefined) {
-      list = await repo.find({
-        where: { on_website: onWebsite === 'true' || onWebsite === true }
-      });
-    } else {
-      list = await repo.find();
-    }
+    // Always read every category: parent names have to resolve against the full
+    // set, otherwise a sub-category whose parent is not flagged on_website came
+    // back with parentName "Unknown" and lost its place in the tree.
+    const all = await repo.find();
+
+    const wantWebsite = onWebsite === 'true' || onWebsite === true;
+    const list = onWebsite !== undefined
+      ? all.filter(c => Boolean(c.on_website) === wantWebsite)
+      : all;
+
+    const visibleIds = new Set(list.map(c => c.id));
 
     const categoriesWithParentNames = list.map(cat => {
       let parentName = null;
       if (cat.parent_id) {
-        const parent = list.find(p => p.id === cat.parent_id);
-        parentName = parent ? parent.nom : 'Unknown';
+        const parent = all.find(p => p.id === cat.parent_id);
+        parentName = parent ? parent.nom : null;
       }
 
       return {
         ...formatCategorie(cat),
-        parentName: parentName
+        parentName,
+        // The website builds its menu from parent_id. When the parent is not
+        // part of this result set the child must surface as a root instead of
+        // pointing at a category the caller cannot see.
+        parent_id: cat.parent_id && visibleIds.has(cat.parent_id) ? cat.parent_id : null,
+        // Convenience flags so callers do not have to re-derive the tree.
+        has_children: list.some(c => c.parent_id === cat.id),
       };
     });
 
@@ -172,9 +181,11 @@ exports.remove = async (req, res) => {
 
     if (!item) return res.status(404).json({ message: 'Category not found' });
 
-    const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(item.image));
-    if (item.image && fs.existsSync(absPath)) {
+    if (item.image) {
+      const absPath = path.join(UPLOAD_ROOT, "..", toRelativePath(item.image));
+      if (fs.existsSync(absPath)) {
         try { fs.unlinkSync(absPath); } catch(e) {}
+      }
     }
 
     await repo.remove(item);

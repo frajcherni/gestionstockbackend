@@ -47,6 +47,7 @@ const { Carousel } = require("./entities/Carousel");
 const { Promo } = require("./entities/Promo");
 const { Brand } = require("./entities/Brand");
 const { Testimonial } = require("./entities/Testimonial");
+const { Announcement } = require("./entities/Announcement");
 
 const {StockDepot} = require("./entities/StockDepot");
 const {Depot} = require("./entities/Depot");
@@ -97,6 +98,7 @@ module.exports.AppDataSource = new DataSource({
     Promo,
     Brand,
     Testimonial,
+    Announcement,
     JournalSortieArticle
   ],
 });

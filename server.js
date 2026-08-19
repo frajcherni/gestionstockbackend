@@ -30,6 +30,7 @@ const CarouselRoutes = require("./routes/CarouselRoutes");
 const PromoRoutes = require("./routes/PromoRoutes");
 const BrandRoutes = require("./routes/BrandRoutes");
 const TestimonialRoutes = require("./routes/TestimonialRoutes");
+const AnnouncementRoutes = require("./routes/AnnouncementRoutes");
 const journalSortieRoutes = require("./routes/journalSortieRoutes");
 
 
@@ -45,7 +46,7 @@ app.set("trust proxy", true);
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "http://localhost:5173", "http://54.37.159.225", "https://royallumiere.tn", "https://shop.royallumiere.tn",
+    origin: ["http://localhost:3000","http://localhost:3001", "http://localhost:5173", "http://54.37.159.225", "https://royallumiere.tn", "https://shop.royallumiere.tn",
       "https://www.royallumiere.tn"], // 👈 Add your frontend URLs
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
@@ -122,6 +123,7 @@ app.use("/api/carousel", CarouselRoutes);
 app.use("/api/promos", PromoRoutes);
 app.use("/api/brands", BrandRoutes);
 app.use("/api/testimonials", TestimonialRoutes);
+app.use("/api/announcements", AnnouncementRoutes);
 app.use("/api/journal-sortie", journalSortieRoutes);
 
 
