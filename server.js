@@ -31,6 +31,7 @@ const PromoRoutes = require("./routes/PromoRoutes");
 const BrandRoutes = require("./routes/BrandRoutes");
 const TestimonialRoutes = require("./routes/TestimonialRoutes");
 const AnnouncementRoutes = require("./routes/AnnouncementRoutes");
+const SiteSettingRoutes = require("./routes/SiteSettingRoutes");
 const journalSortieRoutes = require("./routes/journalSortieRoutes");
 
 
@@ -124,6 +125,7 @@ app.use("/api/promos", PromoRoutes);
 app.use("/api/brands", BrandRoutes);
 app.use("/api/testimonials", TestimonialRoutes);
 app.use("/api/announcements", AnnouncementRoutes);
+app.use("/api/site-settings", SiteSettingRoutes);
 app.use("/api/journal-sortie", journalSortieRoutes);
 
 
