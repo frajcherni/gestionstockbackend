@@ -69,7 +69,7 @@ exports.getAll = async (req, res) => {
 
     const wantWebsite = onWebsite === 'true' || onWebsite === true;
     const list = onWebsite !== undefined
-      ? all.filter(c => Boolean(c.on_website) === wantWebsite)
+      ? all.filter(c => wantWebsite ? (Boolean(c.on_website) || Boolean(c.show_in_univers)) : (!c.on_website && !c.show_in_univers))
       : all;
 
     const visibleIds = new Set(list.map(c => c.id));
@@ -116,7 +116,9 @@ exports.create = async (req, res) => {
         parent_id: req.body.parent_id || null,
         image: fileToRelative(req.file),
         on_website: req.body.on_website === 'true' || req.body.on_website === true,
-        website_order: parseInt(req.body.website_order) || 0
+        website_order: parseInt(req.body.website_order) || 0,
+        show_in_univers: req.body.show_in_univers === 'true' || req.body.show_in_univers === true,
+        univers_order: parseInt(req.body.univers_order) || 0,
       };
 
       const newItem = repo.create(data);
@@ -149,7 +151,9 @@ exports.update = async (req, res) => {
         description: req.body.description !== undefined ? req.body.description : item.description,
         parent_id: req.body.parent_id !== undefined ? (req.body.parent_id || null) : item.parent_id,
         on_website: req.body.on_website !== undefined ? (req.body.on_website === 'true' || req.body.on_website === true) : item.on_website,
-        website_order: req.body.website_order !== undefined ? parseInt(req.body.website_order) : item.website_order
+        website_order: req.body.website_order !== undefined ? parseInt(req.body.website_order) : item.website_order,
+        show_in_univers: req.body.show_in_univers !== undefined ? (req.body.show_in_univers === 'true' || req.body.show_in_univers === true) : item.show_in_univers,
+        univers_order: req.body.univers_order !== undefined ? parseInt(req.body.univers_order) : item.univers_order,
       };
 
       if (req.file) {

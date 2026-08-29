@@ -44,11 +44,13 @@ const { PaiementClient } = require("./entities/PaiementClient");
 const {Inventaire, InventaireItem} = require("./entities/Inventaire");
 const { Transfer, TransferItem } = require("./entities/Transfer");
 const { Carousel } = require("./entities/Carousel");
-const { Promo } = require("./entities/Promo");
+const { Offer } = require("./entities/Offer");
+const { Promo, PromoItem } = require("./entities/Promo");
 const { Brand } = require("./entities/Brand");
 const { Testimonial } = require("./entities/Testimonial");
 const { Announcement } = require("./entities/Announcement");
 const { SiteSetting } = require("./entities/SiteSetting");
+const { WebsiteFeature } = require("./entities/WebsiteFeature");
 
 const {StockDepot} = require("./entities/StockDepot");
 const {Depot} = require("./entities/Depot");
@@ -96,11 +98,14 @@ module.exports.AppDataSource = new DataSource({
     Transfer,
     TransferItem,
     Carousel,
+    Offer,
     Promo,
+    PromoItem,
     Brand,
     Testimonial,
     Announcement,
     SiteSetting,
+    WebsiteFeature,
     JournalSortieArticle
   ],
 });

@@ -27,11 +27,13 @@ const inventaireRoutes = require("./routes/inventaireRoutes");
 const depotRoutes = require("./routes/depotRoutes");
 const TransfertRoutes = require("./routes/TransfertRoutes");
 const CarouselRoutes = require("./routes/CarouselRoutes");
+const OfferRoutes = require("./routes/OfferRoutes");
 const PromoRoutes = require("./routes/PromoRoutes");
 const BrandRoutes = require("./routes/BrandRoutes");
 const TestimonialRoutes = require("./routes/TestimonialRoutes");
 const AnnouncementRoutes = require("./routes/AnnouncementRoutes");
 const SiteSettingRoutes = require("./routes/SiteSettingRoutes");
+const WebsiteFeatureRoutes = require("./routes/WebsiteFeatureRoutes");
 const journalSortieRoutes = require("./routes/journalSortieRoutes");
 
 
@@ -121,11 +123,13 @@ app.use("/api/Transfert", TransfertRoutes);
 
 app.use("/api/depots", depotRoutes);
 app.use("/api/carousel", CarouselRoutes);
+app.use("/api/offers", OfferRoutes);
 app.use("/api/promos", PromoRoutes);
 app.use("/api/brands", BrandRoutes);
 app.use("/api/testimonials", TestimonialRoutes);
 app.use("/api/announcements", AnnouncementRoutes);
 app.use("/api/site-settings", SiteSettingRoutes);
+app.use("/api/website-features", WebsiteFeatureRoutes);
 app.use("/api/journal-sortie", journalSortieRoutes);
 
 

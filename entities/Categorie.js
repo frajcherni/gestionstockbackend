@@ -14,6 +14,8 @@ const Categorie = new EntitySchema({
     image: { type: "varchar", nullable: true }, // ADD THIS LINE
     on_website: { type: "boolean", default: false, nullable: true },
     website_order: { type: "int", default: 0, nullable: true },
+    show_in_univers: { type: "boolean", default: false, nullable: true },
+    univers_order: { type: "int", default: 0, nullable: true },
   }
 });
 
