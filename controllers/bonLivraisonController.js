@@ -1017,6 +1017,7 @@ exports.getBonLivraisonPaginated = async (req, res) => {
       page = 1,
       limit = 10,
       search = "",
+      searchPhone = "",
       status = "",
       startDate,
       endDate,
@@ -1035,6 +1036,15 @@ exports.getBonLivraisonPaginated = async (req, res) => {
       idQb.andWhere(
         "(bon.numeroLivraison ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR client.telephone2 ILIKE :search)",
         { search: `%${search}%` }
+      );
+    }
+    // Dedicated phone search — compare digits only so "12 345 678" typed in the
+    // filter matches a number stored with or without spaces.
+    if (searchPhone && String(searchPhone).trim()) {
+      const cleanPhone = String(searchPhone).replace(/\s/g, "");
+      idQb.andWhere(
+        "(REPLACE(client.telephone1, ' ', '') ILIKE :phone OR REPLACE(client.telephone2, ' ', '') ILIKE :phone)",
+        { phone: `%${cleanPhone}%` }
       );
     }
     if (status) {

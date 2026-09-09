@@ -941,6 +941,7 @@ exports.getBonsCommandeClientPaginated = async (req, res) => {
       page = 1,
       limit = 10,
       search = "",
+      searchPhone = "",
       status = "",
       startDate,
       endDate,
@@ -959,6 +960,16 @@ exports.getBonsCommandeClientPaginated = async (req, res) => {
       idQb.andWhere(
         "(bon.numeroCommande ILIKE :search OR client.raison_sociale ILIKE :search OR client.telephone1 ILIKE :search OR clientWebsite.nomPrenom ILIKE :search OR clientWebsite.telephone ILIKE :search)",
         { search: `%${search}%` }
+      );
+    }
+    // Dedicated phone search — compare digits only so "12 345 678" typed in the
+    // filter matches a number stored with or without spaces (covers both the
+    // ERP client and the website client).
+    if (searchPhone && String(searchPhone).trim()) {
+      const cleanPhone = String(searchPhone).replace(/\s/g, "");
+      idQb.andWhere(
+        "(REPLACE(client.telephone1, ' ', '') ILIKE :phone OR REPLACE(client.telephone2, ' ', '') ILIKE :phone OR REPLACE(clientWebsite.telephone, ' ', '') ILIKE :phone)",
+        { phone: `%${cleanPhone}%` }
       );
     }
     if (status) {

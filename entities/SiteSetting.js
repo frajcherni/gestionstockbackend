@@ -63,6 +63,14 @@ const SiteSetting = new EntitySchema({
     /** Relative path of the uploaded showroom photo, or null for the built-in default. */
     showroom_image: { type: "varchar", nullable: true },
 
+    /* ── FOOTER CATEGORY MENU ────────────────────────────────────
+       Which categories the shop's footer lists, in the order they were
+       picked. Stored as a JSON array of ids ("[3,7,12]") rather than a
+       join table: the list is short, always read as a whole, and the ids
+       may point at either a root category or a sub-category. Null or
+       empty means "fall back to the first root categories". */
+    footer_category_ids: { type: "text", nullable: true },
+
     /** Footer "About us" block. */
     footer_about_title: { type: "varchar", default: "À propos" },
     /* No DB-level default here: it contains an apostrophe ("l'excellence") that

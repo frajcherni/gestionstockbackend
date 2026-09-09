@@ -41,6 +41,22 @@ const TEXT_DEFAULTS = {
   working_hours_friday: "Ven: 09:00 - 12:00, 14:00 - 18:00",
 };
 
+/**
+ * The footer category list is stored as a JSON string; hand the front office a
+ * real array of numeric ids. A malformed or legacy value degrades to an empty
+ * list, which the shop reads as "fall back to the first root categories".
+ */
+function parseCategoryIds(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(Number).filter((n) => Number.isFinite(n));
+  } catch (e) {
+    return [];
+  }
+}
+
 function formatSetting(s) {
   if (!s) return s;
   const out = {
@@ -48,6 +64,7 @@ function formatSetting(s) {
     logo: toRelativePath(s.logo),
     promo_image: toRelativePath(s.promo_image),
     showroom_image: toRelativePath(s.showroom_image),
+    footer_category_ids: parseCategoryIds(s.footer_category_ids),
   };
   Object.entries(TEXT_DEFAULTS).forEach(([key, fallback]) => {
     if (out[key] === null || out[key] === undefined || out[key] === "") out[key] = fallback;
@@ -174,6 +191,15 @@ exports.update = async (req, res) => {
       TEXT_FIELDS.forEach((field) => {
         data[field] = req.body[field] !== undefined ? req.body[field] : item[field];
       });
+
+      // Arrives as a JSON string (the form is multipart, so it cannot carry a
+      // real array). Re-serialise from the parsed ids so a hand-crafted or
+      // malformed payload can never be written straight into the column.
+      if (req.body.footer_category_ids !== undefined) {
+        data.footer_category_ids = JSON.stringify(
+          parseCategoryIds(req.body.footer_category_ids)
+        );
+      }
 
       if (logoFile) data.logo = fileToRelative(logoFile);
       if (promoFile) data.promo_image = fileToRelative(promoFile);
