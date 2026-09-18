@@ -89,8 +89,33 @@ exports.createBonCommandeClient = async (req, res) => {
               "Nom, téléphone et adresse sont obligatoires pour les clients du site web",
           });
       }
+
+      // Keep the lightweight snapshot of what the visitor typed on this
+      // order (unchanged from before)...
       clientWebsite = clientWebsiteRepo.create(clientWebsiteInfo);
       clientWebsite = await clientWebsiteRepo.save(clientWebsite);
+
+      // ...but also find-or-create a real Client, so the order shows up in
+      // the ERP's own client list instead of only in the separate
+      // client_website table. Matched by phone number: a returning website
+      // customer must not spawn a new "client" on every order.
+      client = await clientRepo.findOneBy({
+        telephone1: clientWebsiteInfo.telephone,
+      });
+      if (!client) {
+        client = clientRepo.create({
+          raison_sociale: clientWebsiteInfo.nomPrenom,
+          designation: clientWebsiteInfo.nomPrenom,
+          telephone1: clientWebsiteInfo.telephone,
+          email: clientWebsiteInfo.email || null,
+          adresse: clientWebsiteInfo.adresse,
+          ville: clientWebsiteInfo.ville || null,
+          code_postal: clientWebsiteInfo.code_postal || null,
+          commentaire: "Créé automatiquement depuis une commande du site web",
+          date_creation: new Date(),
+        });
+        client = await clientRepo.save(client);
+      }
     } else {
       await queryRunner.rollbackTransaction();
       return res.status(400).json({ message: "Informations client requises" });
