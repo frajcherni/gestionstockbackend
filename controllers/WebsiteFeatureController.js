@@ -20,7 +20,6 @@ const DEFAULTS = [
   { icon: "grid",     title: "Large choix",           description: "Un large choix de luminaires, mobilier et décoration.",           order: 1 },
   { icon: "sparkles", title: "Styles pour tous",      description: "Du moderne au classique, pour tous les goûts.",                   order: 2 },
   { icon: "headset",  title: "Conseils personnalisés", description: "Notre équipe est à votre écoute pour vous guider.",              order: 3 },
-  { icon: "truck",    title: "Livraison rapide",      description: "Livraison rapide et sécurisée partout en Tunisie.",               order: 4 },
 ];
 
 exports.getAll = async (req, res) => {

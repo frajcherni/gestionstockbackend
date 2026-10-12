@@ -114,7 +114,10 @@ exports.searchClients = async (req, res) => {
     if (isNaN(pageNumber) || pageNumber < 1) pageNumber = 1;
     if (isNaN(limitNumber) || limitNumber < 1) limitNumber = 20;
 
-    limitNumber = Math.min(limitNumber, 100);
+    // Raised from 100: this endpoint also backs the "pick a client while
+    // creating an order" search, which asks for every match on a phone
+    // number in one page rather than paginating a dropdown.
+    limitNumber = Math.min(limitNumber, 500);
     const offset = (pageNumber - 1) * limitNumber;
 
     const repo = AppDataSource.getRepository(Client);
