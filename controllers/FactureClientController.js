@@ -482,8 +482,9 @@ exports.createFactureClient = async (req, res) => {
       }
     }
 
-    // Calculate net à payer (after retention)
-    const netAPayer =
+    // Amount left to collect: the retenue à la source is NOT subtracted from the
+    // net à payer, but it is settled by the client's certificate, so it reduces the reste.
+    const montantAEncaisser =
       parseFloat(totalTTCAfterRemise || totalTTC || 0) -
       parseFloat(montantRetenue || 0);
 
@@ -511,7 +512,7 @@ exports.createFactureClient = async (req, res) => {
       remise: parseFloat(remise || 0),
       remiseType: remiseType || "percentage",
       montantPaye: parseFloat(montantPaye || 0),
-      resteAPayer: Math.max(0, netAPayer - parseFloat(montantPaye || 0)),
+      resteAPayer: Math.max(0, montantAEncaisser - parseFloat(montantPaye || 0)),
       paymentMethods: paymentMethods,
       totalPaymentAmount: parseFloat(totalPaymentAmount || 0),
       espaceNotes: espaceNotes || null,
