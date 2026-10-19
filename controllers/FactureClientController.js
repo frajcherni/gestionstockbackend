@@ -273,6 +273,10 @@ exports.getAllFacturesClientPaginated = async (req, res) => {
         ...calculated,
         allPaymentMethods,
         allPaiements,
+        // The facture's own règlements, without those of its source documents.
+        // The edit form must use these, otherwise saving copies the source règlements
+        // into the facture and they get counted twice.
+        facturePaymentMethods: facture.paymentMethods || [],
         paymentMethods: allPaymentMethods,
         bonCommandePaiements: allPaiements,
       };

@@ -13,6 +13,7 @@ const {
   BonLivraisonArticle,
 } = require("../entities/BonLivraison");
 const { updateDepotStock } = require("../utils/stockUtils");
+const { StockDepot } = require("../entities/StockDepot");
 
 exports.createBonCommandeClient = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
@@ -310,7 +311,7 @@ exports.updateBonCommandeClient = async (req, res) => {
     // --- Load existing bon ---
     const bon = await bonRepo.findOne({
       where: { id: parseInt(req.params.id) },
-      relations: ["articles", "articles.article", "client", "vendeur", "depot"],
+      relations: ["articles", "articles.article", "client", "vendeur", "depot", "clientWebsite"],
     });
 
     if (!bon) {
@@ -365,6 +366,13 @@ exports.updateBonCommandeClient = async (req, res) => {
       } else {
         newStatus = "Confirme";
       }
+    }
+
+    // A website order is confirmed or cancelled through its own workflow
+    // (updateWebOrderStatus): editing it with nothing delivered must not
+    // silently confirm it, nor bring a cancelled one back.
+    if (bon.clientWebsite && newStatus === "Confirme" && ["En Attente", "Annule"].includes(bon.status)) {
+      newStatus = bon.status;
     }
 
     // --- CHECK FOR RETENUE AND CALCULATE ---
@@ -749,6 +757,152 @@ exports.annulerBonCommandeClient = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────
+// WEBSITE ORDERS — status workflow
+// En Attente → Confirme → Livre, or Annule before anything is delivered.
+// Only for orders placed on the website (they carry a clientWebsite).
+// Stock moves at one step only: "Livre" takes whatever is still undelivered
+// out of the chosen depot. A bon de livraison or a facture made from the
+// order already records its deliveries in quantiteLivree, so nothing is
+// ever taken out twice.
+// ─────────────────────────────────────────────────────────────────
+const WEB_TRANSITIONS = {
+  "En Attente": ["Confirme", "Annule"],
+  Confirme: ["Livre", "Annule"],
+  "Partiellement Livre": ["Livre"],
+};
+
+const remainingToDeliver = (item) =>
+  Math.max(0, (parseInt(item.quantite) || 0) - (parseInt(item.quantiteLivree) || 0));
+
+// GET /:id/web-livraison?depot_id= — what "Livre" would take out of that depot.
+exports.previewWebOrderDelivery = async (req, res) => {
+  try {
+    const bon = await AppDataSource.getRepository(BonCommandeClient).findOne({
+      where: { id: parseInt(req.params.id) },
+      relations: ["articles", "articles.article", "clientWebsite"],
+    });
+    if (!bon) return res.status(404).json({ message: "Commande introuvable" });
+    if (!bon.clientWebsite) {
+      return res.status(400).json({ message: "Réservé aux commandes du site web" });
+    }
+
+    const depotId = parseInt(req.query.depot_id) || null;
+    const stockRepo = AppDataSource.getRepository(StockDepot);
+    const lines = [];
+    for (const item of bon.articles || []) {
+      let stockDepot = null;
+      if (depotId && item.article) {
+        const stock = await stockRepo.findOne({
+          where: { article_id: item.article.id, depot_id: depotId },
+        });
+        stockDepot = stock ? Number(stock.qte) || 0 : 0;
+      }
+      lines.push({
+        article_id: item.article ? item.article.id : null,
+        reference: item.article ? item.article.reference : null,
+        designation: item.designation || (item.article && item.article.designation) || "",
+        quantite: parseInt(item.quantite) || 0,
+        dejaLivree: parseInt(item.quantiteLivree) || 0,
+        aLivrer: remainingToDeliver(item),
+        stockDepot,
+      });
+    }
+    res.json({ lines });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// POST /:id/web-status  { status: "Confirme" | "Livre" | "Annule", depot_id? }
+exports.updateWebOrderStatus = async (req, res) => {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  const refuse = async (code, message) => {
+    await queryRunner.rollbackTransaction();
+    return res.status(code).json({ message });
+  };
+
+  try {
+    const { status, depot_id } = req.body;
+    const bonRepo = queryRunner.manager.getRepository(BonCommandeClient);
+    const bon = await bonRepo.findOne({
+      where: { id: parseInt(req.params.id) },
+      relations: ["articles", "articles.article", "clientWebsite", "depot"],
+    });
+
+    if (!bon) return refuse(404, "Commande introuvable");
+    if (!bon.clientWebsite) {
+      return refuse(400, "Ce changement de statut est réservé aux commandes du site web");
+    }
+    if (!(WEB_TRANSITIONS[bon.status] || []).includes(status)) {
+      return refuse(400, `Impossible de passer de « ${bon.status} » à « ${status} »`);
+    }
+
+    // Cancelling must not hide stock that already left: a bon de livraison or
+    // a facture made from this order may have delivered part of it.
+    if (status === "Annule" && (bon.articles || []).some((i) => (parseInt(i.quantiteLivree) || 0) > 0)) {
+      return refuse(
+        400,
+        "Des quantités de cette commande ont déjà été livrées (stock déjà sorti) : elle ne peut plus être annulée ici"
+      );
+    }
+
+    const moved = [];
+    let depot = null;
+    if (status === "Livre") {
+      depot = depot_id
+        ? await queryRunner.manager.getRepository(Depot).findOneBy({ id: parseInt(depot_id) })
+        : bon.depot;
+      // Without a depot updateDepotStock does nothing, so the stock would never move.
+      if (!depot) return refuse(400, "Choisissez le dépôt d'où sortira le stock");
+
+      const itemRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
+      for (const item of bon.articles || []) {
+        const toDeliver = remainingToDeliver(item);
+        if (toDeliver === 0 || !item.article) continue;
+
+        await updateDepotStock(queryRunner.manager, item.article.id, depot.id, -toDeliver, {
+          typeDocument: "bon_commande_client",
+          documentId: bon.id,
+          numeroDocument: bon.numeroCommande,
+          dateSortie: new Date(),
+        });
+        item.quantiteLivree = (parseInt(item.quantiteLivree) || 0) + toDeliver;
+        item.quantiteLivreeDirecte = (parseInt(item.quantiteLivreeDirecte) || 0) + toDeliver;
+        await itemRepo.save(item);
+        moved.push({
+          designation: item.designation || item.article.designation || "",
+          quantite: toDeliver,
+        });
+      }
+
+      bon.depot = depot;
+      bon.depot_id = depot.id;
+      if (!bon.dateLivBonCommande) bon.dateLivBonCommande = new Date();
+    }
+
+    bon.status = status;
+    await bonRepo.save(bon);
+    await queryRunner.commitTransaction();
+
+    res.json({
+      status,
+      depot: depot ? { id: depot.id, nom: depot.nom } : null,
+      moved,
+    });
+  } catch (err) {
+    await queryRunner.rollbackTransaction();
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur", error: err.message });
+  } finally {
+    await queryRunner.release();
   }
 };
 

@@ -34,6 +34,16 @@ router.post(
   bonCommandeClientController.annulerBonCommandeClient
 );
 
+// Website orders: what "Livre" would take out of a depot, then the status change
+router.get(
+  "/:id/web-livraison",
+  bonCommandeClientController.previewWebOrderDelivery
+);
+router.post(
+  "/:id/web-status",
+  bonCommandeClientController.updateWebOrderStatus
+);
+
 router.get(
   "/getnumbercommande",
   bonCommandeClientController.getNextCommandeNumber

@@ -6,6 +6,8 @@ const Carousel = new EntitySchema({
     columns: {
         id: { type: "int", primary: true, generated: true },
         image: { type: "varchar", nullable: false },
+        // Optional image for tablet & phone; the shop falls back to `image` without it.
+        image_mobile: { type: "varchar", nullable: true },
         title: { type: "varchar", nullable: true },
         subtitle: { type: "varchar", nullable: true },
         link: { type: "varchar", nullable: true },
