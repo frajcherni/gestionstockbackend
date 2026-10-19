@@ -802,6 +802,7 @@ exports.previewWebOrderDelivery = async (req, res) => {
         stockDepot = stock ? Number(stock.qte) || 0 : 0;
       }
       lines.push({
+        line_id: item.id,
         article_id: item.article ? item.article.id : null,
         reference: item.article ? item.article.reference : null,
         designation: item.designation || (item.article && item.article.designation) || "",
@@ -818,7 +819,10 @@ exports.previewWebOrderDelivery = async (req, res) => {
   }
 };
 
-// POST /:id/web-status  { status: "Confirme" | "Livre" | "Annule", depot_id? }
+// POST /:id/web-status  { status: "Confirme" | "Livre" | "Annule", depot_id?, lines? }
+// For "Livre", `lines` ([{ line_id, quantite }]) is what to deliver now per order
+// line (everything left when omitted); the order ends "Livre" or
+// "Partiellement Livre" depending on what remains.
 exports.updateWebOrderStatus = async (req, res) => {
   const queryRunner = AppDataSource.createQueryRunner();
   await queryRunner.connect();
@@ -856,6 +860,7 @@ exports.updateWebOrderStatus = async (req, res) => {
 
     const moved = [];
     let depot = null;
+    let finalStatus = status;
     if (status === "Livre") {
       depot = depot_id
         ? await queryRunner.manager.getRepository(Depot).findOneBy({ id: parseInt(depot_id) })
@@ -863,9 +868,19 @@ exports.updateWebOrderStatus = async (req, res) => {
       // Without a depot updateDepotStock does nothing, so the stock would never move.
       if (!depot) return refuse(400, "Choisissez le dépôt d'où sortira le stock");
 
+      const requested = Array.isArray(req.body.lines) ? req.body.lines : null;
       const itemRepo = queryRunner.manager.getRepository(BonCommandeClientArticle);
       for (const item of bon.articles || []) {
-        const toDeliver = remainingToDeliver(item);
+        const remaining = remainingToDeliver(item);
+        let toDeliver = remaining;
+        if (requested) {
+          const line = requested.find((l) => parseInt(l.line_id) === item.id);
+          toDeliver = line ? parseInt(line.quantite) || 0 : 0;
+        }
+        if (toDeliver < 0 || toDeliver > remaining) {
+          const name = item.designation || (item.article && item.article.designation) || "";
+          return refuse(400, `Quantité invalide pour ${name} : ${toDeliver} (reste à livrer : ${remaining})`);
+        }
         if (toDeliver === 0 || !item.article) continue;
 
         await updateDepotStock(queryRunner.manager, item.article.id, depot.id, -toDeliver, {
@@ -882,18 +897,24 @@ exports.updateWebOrderStatus = async (req, res) => {
           quantite: toDeliver,
         });
       }
+      if (moved.length === 0) return refuse(400, "Aucune quantité à livrer");
+
+      // Delivered in full, or only part of it: same rule as a bon de livraison.
+      const totalOrdered = (bon.articles || []).reduce((s, i) => s + (parseInt(i.quantite) || 0), 0);
+      const totalDelivered = (bon.articles || []).reduce((s, i) => s + (parseInt(i.quantiteLivree) || 0), 0);
+      finalStatus = totalDelivered >= totalOrdered ? "Livre" : "Partiellement Livre";
 
       bon.depot = depot;
       bon.depot_id = depot.id;
       if (!bon.dateLivBonCommande) bon.dateLivBonCommande = new Date();
     }
 
-    bon.status = status;
+    bon.status = finalStatus;
     await bonRepo.save(bon);
     await queryRunner.commitTransaction();
 
     res.json({
-      status,
+      status: finalStatus,
       depot: depot ? { id: depot.id, nom: depot.nom } : null,
       moved,
     });
