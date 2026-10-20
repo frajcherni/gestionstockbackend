@@ -472,7 +472,24 @@ exports.updateBonLivraison = async (req, res) => {
       totalTTCAfterRemise,
       paymentMethods,
       espaceNotes,
+      client_id,
+      vendeur_id,
     } = req.body;
+
+    // Client / vendeur picked in the edit form. They used to be ignored, so the
+    // BL kept its old client whatever was chosen. Checked before any stock moves.
+    let newClient = null;
+    if (client_id && parseInt(client_id) !== bon.client?.id) {
+      newClient = await queryRunner.manager.getRepository(Client).findOneBy({ id: parseInt(client_id) });
+      if (!newClient) {
+        await queryRunner.rollbackTransaction();
+        return res.status(404).json({ message: "Client non trouvé" });
+      }
+    }
+    let newVendeur = null;
+    if (vendeur_id && parseInt(vendeur_id) !== bon.vendeur?.id) {
+      newVendeur = await queryRunner.manager.getRepository(Vendeur).findOneBy({ id: parseInt(vendeur_id) });
+    }
 
     const oldStatus = bon.status || "Livré";
     const oldWasDelivered = oldStatus === "Livré" || oldStatus === "Partiellement Livré";
@@ -535,6 +552,8 @@ exports.updateBonLivraison = async (req, res) => {
     bon.remiseType = remiseType || bon.remiseType;
     bon.notes = notes || bon.notes;
     bon.taxMode = taxMode || bon.taxMode;
+    if (newClient) bon.client = newClient;
+    if (newVendeur) bon.vendeur = newVendeur;
 
     if (depot_id) {
       const newDepot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
