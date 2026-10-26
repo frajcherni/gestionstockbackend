@@ -719,8 +719,36 @@ exports.searchArticles = async (req, res) => {
     const sortBy = req.body.sortBy || "article.designation";
     const sortOrder = req.body.sortOrder || "ASC";
 
+    // When a term is typed, rank by relevance first so every screen (article
+    // list, facture, devis, commande, BL...) shows the same best matches at
+    // the top: exact reference, reference prefix, reference contains, then
+    // designation prefix/contains, then the other fields. The requested sort
+    // only breaks ties inside a rank. Without this, a short dropdown (limit
+    // 10, sorted by designation) buries "COUPE" behind "AMPOULE ... COUPE ...".
+    const rankTerm = reference || q;
+    if (rankTerm !== "") {
+      qb.orderBy(
+        `CASE
+          WHEN LOWER(article.reference) = LOWER(:rankExact) THEN 0
+          WHEN article.reference ILIKE :rankPrefix THEN 1
+          WHEN article.reference ILIKE :rankContains THEN 2
+          WHEN article.designation ILIKE :rankPrefix THEN 3
+          WHEN article.designation ILIKE :rankContains THEN 4
+          ELSE 5
+        END`,
+        "ASC"
+      )
+        .addOrderBy(sortBy, sortOrder)
+        .setParameters({
+          rankExact: rankTerm,
+          rankPrefix: `${rankTerm}%`,
+          rankContains: `%${rankTerm}%`,
+        });
+    } else {
+      qb.orderBy(sortBy, sortOrder);
+    }
+
     const { entities, raw } = await qb
-      .orderBy(sortBy, sortOrder)
       .offset(offset)
       .limit(limitNumber)
       .getRawAndEntities();

@@ -20,7 +20,8 @@ const ALIASES = {
 const norm = (m) => {
   const k = String(m ?? "").trim().toLowerCase();
   return ALIASES[k] ?? k;
-};
+}; 
+
 const amt = (v) => {
   const n = typeof v === "string" ? parseFloat(v.replace(",", ".")) : Number(v);
   return isNaN(n) ? 0 : n;
