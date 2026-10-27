@@ -400,24 +400,22 @@ exports.getNextFactureNumber = async (req, res) => {
     const repo = AppDataSource.getRepository(FactureFournisseur);
 
     // Get the last numeroFacture for this year
-    const lastFacture = await repo
+    // (keep the highest sequence: string ordering is wrong with mixed padding)
+    const factures = await repo
       .createQueryBuilder("fact")
+      .select(["fact.id", "fact.numeroFacture"])
       .where("fact.numeroFacture ILIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
-      .orderBy("fact.numeroFacture", "DESC")
-      .getOne();
+      .getMany();
 
-    let nextNumber = 1;
+    const numeroRegex = new RegExp(`^${prefix}-(\\d+)/${year}$`, "i");
+    const lastNumber = factures.reduce((max, { numeroFacture }) => {
+      const match = numeroFacture?.trim().match(numeroRegex);
+      return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    }, 0);
 
-    if (lastFacture && lastFacture.numeroFacture) {
-      const match = lastFacture.numeroFacture.match(
-        new RegExp(`^${prefix}-(\\d{4})/${year}$`)
-      );
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
-    }
+    const nextNumber = lastNumber + 1;
 
     const nextFactureNumber = `${prefix}-${nextNumber
       .toString()

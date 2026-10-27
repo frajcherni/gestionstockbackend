@@ -79,6 +79,14 @@ exports.createBonReception = async (req, res) => {
         return res.status(404).json({ message: "Bon de commande non trouvé" });
     }
 
+    // ✅ numeroReception is unique: refuse duplicates before touching stock
+    const existingReception = await bonReceptionRepo.findOneBy({ numeroReception });
+    if (existingReception) {
+      return res.status(409).json({
+        message: `Le numéro ${numeroReception} existe déjà, veuillez utiliser un autre numéro`,
+      });
+    }
+
     // ✅ Always set status to 'Recu' for BonReception
     const bonReception = {
       numeroReception,
@@ -93,8 +101,8 @@ exports.createBonReception = async (req, res) => {
       articles: [],
     };
 
-    // ✅ Handle article updates
-    for (const item of articles) {
+    // ✅ Validate all articles before any stock movement
+    for (const item of articles || []) {
       const article = await articleRepo.findOneBy({
         id: parseInt(item.article_id),
       });
@@ -103,33 +111,32 @@ exports.createBonReception = async (req, res) => {
           .status(404)
           .json({ message: `Article ID ${item.article_id} non trouvé` });
 
-      const qty = parseInt(item.quantite);
-      const prixUnitaire = parseFloat(item.prix_unitaire);
-      const tvaRate = item.tva !== undefined ? parseFloat(item.tva) : null;
-      const remiseArticle =
-        item.remise !== undefined ? parseFloat(item.remise) : null;
-
-      // ✅ Update stock (depot + total) using utility
-      if (depot_id) {
-        await updateDepotStock(AppDataSource.manager, article.id, parseInt(depot_id), qty);
-      } else {
-        // Fallback for global stock if no depot
-        article.qte = (article.qte || 0) + qty;
-        article.qte_physique = (article.qte_physique || 0) + qty;
-        await articleRepo.save(article);
-      }
-
       bonReception.articles.push({
         article,
-        quantite: qty,
-        prixUnitaire,
-        tva: tvaRate,
-        remise: remiseArticle,
+        quantite: parseInt(item.quantite),
+        prixUnitaire: parseFloat(item.prix_unitaire) || 0,
+        tva: item.tva !== undefined ? parseFloat(item.tva) : null,
+        remise: item.remise !== undefined ? parseFloat(item.remise) : null,
       });
     }
 
-    // ✅ Save Bon de Réception
-    const savedReception = await bonReceptionRepo.save(bonReception);
+    // ✅ Stock update + save in one transaction: if the save fails, stock is rolled back
+    const savedReception = await AppDataSource.transaction(async (tm) => {
+      const trxArticleRepo = tm.getRepository(Article);
+
+      for (const line of bonReception.articles) {
+        if (depot_id) {
+          await updateDepotStock(tm, line.article.id, parseInt(depot_id), line.quantite);
+        } else {
+          // Fallback for global stock if no depot
+          line.article.qte = (line.article.qte || 0) + line.quantite;
+          line.article.qte_physique = (line.article.qte_physique || 0) + line.quantite;
+          await trxArticleRepo.save(line.article);
+        }
+      }
+
+      return tm.getRepository(BonReception).save(bonReception);
+    });
 
     // 🚫 Do NOT modify BonCommande status
     res.status(201).json(savedReception);
@@ -363,25 +370,23 @@ exports.getNextReceptionNumber = async (req, res) => {
 
     const repo = AppDataSource.getRepository(BonReception);
 
-    // Get the last numeroReception for this year
-    const lastReception = await repo
+    // Get all numeroReception for this year and keep the highest sequence
+    // (string ordering is wrong with mixed padding: "BR-010" < "BR-0009")
+    const receptions = await repo
       .createQueryBuilder("br")
+      .select(["br.id", "br.numeroReception"])
       .where("br.numeroReception ILIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
-      .orderBy("br.numeroReception", "DESC")
-      .getOne();
+      .getMany();
 
-    let nextNumber = 1;
+    const numeroRegex = new RegExp(`^${prefix}-(\\d+)/${year}$`, "i");
+    const lastNumber = receptions.reduce((max, { numeroReception }) => {
+      const match = numeroReception?.trim().match(numeroRegex);
+      return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    }, 0);
 
-    if (lastReception && lastReception.numeroReception) {
-      const match = lastReception.numeroReception.match(
-        new RegExp(`^${prefix}-(\\d{4})/${year}$`)
-      );
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
-    }
+    const nextNumber = lastNumber + 1;
 
     const nextReceptionNumber = `${prefix}-${nextNumber
       .toString()

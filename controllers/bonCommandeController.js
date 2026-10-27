@@ -380,23 +380,22 @@ exports.getNextCommandeNumber = async (req, res) => {
     const prefix = "BC";
 
     const repo = AppDataSource.getRepository(BonCommande);
-    const lastCommande = await repo
+    // Keep the highest sequence (string ordering is wrong with mixed padding)
+    const commandes = await repo
       .createQueryBuilder("bc")
+      .select(["bc.id", "bc.numeroCommande"])
       .where("bc.numeroCommande ILIKE :pattern", {
         pattern: `${prefix}-%/${year}`,
       })
-      .orderBy("bc.numeroCommande", "DESC")
-      .getOne();
+      .getMany();
 
-    let nextNumber = 1;
-    if (lastCommande && lastCommande.numeroCommande) {
-      const match = lastCommande.numeroCommande.match(
-        new RegExp(`^${prefix}-(\\d{4})/${year}$`)
-      );
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
-    }
+    const numeroRegex = new RegExp(`^${prefix}-(\\d+)/${year}$`, "i");
+    const lastNumber = commandes.reduce((max, { numeroCommande }) => {
+      const match = numeroCommande?.trim().match(numeroRegex);
+      return match ? Math.max(max, parseInt(match[1], 10)) : max;
+    }, 0);
+
+    const nextNumber = lastNumber + 1;
 
     const nextCommandeNumber = `${prefix}-${nextNumber
       .toString()
