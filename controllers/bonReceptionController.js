@@ -7,7 +7,14 @@ const { BonCommande } = require("../entities/BonCommande");
 const { Article } = require("../entities/Article");
 const { Fournisseur } = require("../entities/Fournisseur");
 const { Depot } = require("../entities/Depot");
-const { updateDepotStock } = require("../utils/stockUtils");
+const { updateDepotStock, findMagazinDepot } = require("../utils/stockUtils");
+
+// Optional numeric field from the form ("" / null / undefined → null)
+const parseOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const num = parseFloat(value);
+  return isNaN(num) ? null : num;
+};
 
 /**
  * Status rules for stock handling
@@ -62,11 +69,10 @@ exports.createBonReception = async (req, res) => {
     if (!fournisseur)
       return res.status(404).json({ message: "Fournisseur non trouvé" });
 
-    const depotRepo = AppDataSource.getRepository(Depot);
-    let depot = null;
-    if (depot_id) {
-      depot = await depotRepo.findOneBy({ id: parseInt(depot_id) });
-    }
+    // ✅ No depot chosen → the "magazin" depot, so the stock always lands in a depot
+    const depot = depot_id
+      ? await AppDataSource.getRepository(Depot).findOneBy({ id: parseInt(depot_id) })
+      : await findMagazinDepot(AppDataSource.manager);
 
     // ✅ Optionally link to an existing bon de commande (but don't modify it)
     let bonCommande = null;
@@ -115,6 +121,7 @@ exports.createBonReception = async (req, res) => {
         article,
         quantite: parseInt(item.quantite),
         prixUnitaire: parseFloat(item.prix_unitaire) || 0,
+        prix_ttc: parseOptionalNumber(item.prix_ttc),
         tva: item.tva !== undefined ? parseFloat(item.tva) : null,
         remise: item.remise !== undefined ? parseFloat(item.remise) : null,
       });
@@ -125,8 +132,8 @@ exports.createBonReception = async (req, res) => {
       const trxArticleRepo = tm.getRepository(Article);
 
       for (const line of bonReception.articles) {
-        if (depot_id) {
-          await updateDepotStock(tm, line.article.id, parseInt(depot_id), line.quantite);
+        if (depot) {
+          await updateDepotStock(tm, line.article.id, depot.id, line.quantite);
         } else {
           // Fallback for global stock if no depot
           line.article.qte = (line.article.qte || 0) + line.quantite;
@@ -156,6 +163,78 @@ exports.getAllBonReception = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur" });
+  }
+};
+
+// Same two-step pagination as the ventes lists: paginate the ids with the
+// filters, then load the full bons (articles, fournisseur, depot) for that page only.
+exports.getBonReceptionPaginated = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = "", status = "", startDate, endDate } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, parseInt(limit) || 10);
+    const repo = AppDataSource.getRepository(BonReception);
+
+    const idQb = repo
+      .createQueryBuilder("br")
+      .leftJoin("br.fournisseur", "fournisseur")
+      .select(["br.id", "br.dateReception"]);
+
+    if (search) {
+      idQb.andWhere(
+        "(br.numeroReception ILIKE :search OR fournisseur.raison_sociale ILIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+    if (status) {
+      idQb.andWhere("br.status = :status", { status });
+    }
+    if (startDate) {
+      idQb.andWhere("br.dateReception >= :startDate", { startDate });
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      idQb.andWhere("br.dateReception <= :endDate", { endDate: end });
+    }
+
+    const totalCount = await idQb.getCount();
+    const idResults = await idQb
+      .orderBy("br.dateReception", "DESC")
+      .addOrderBy("br.id", "DESC")
+      .skip((pageNum - 1) * limitNum)
+      .take(limitNum)
+      .getMany();
+
+    const ids = idResults.map((b) => b.id);
+    const pagination = {
+      totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+    };
+
+    if (ids.length === 0) {
+      return res.json({ bons: [], pagination });
+    }
+
+    const bons = await repo
+      .createQueryBuilder("br")
+      .leftJoinAndSelect("br.fournisseur", "fournisseur")
+      .leftJoinAndSelect("br.depot", "depot")
+      .leftJoinAndSelect("br.bonCommande", "bonCommande")
+      .leftJoinAndSelect("br.articles", "articles")
+      .leftJoinAndSelect("articles.article", "article")
+      .where("br.id IN (:...ids)", { ids })
+      .orderBy("br.dateReception", "DESC")
+      .addOrderBy("br.id", "DESC")
+      .addOrderBy("articles.id", "ASC")
+      .getMany();
+
+    res.json({ bons, pagination });
+  } catch (err) {
+    console.error("Pagination error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la pagination", error: err.message });
   }
 };
 
@@ -250,9 +329,11 @@ exports.updateBonReception = async (req, res) => {
         reception.fournisseur = fournisseur;
       }
 
+      // Depot sent, else the bon's own depot, else "magazin"
       if (depot_id) {
-        const depot = await tm.getRepository(Depot).findOneBy({ id: parseInt(depot_id) });
-        reception.depot = depot;
+        reception.depot = await tm.getRepository(Depot).findOneBy({ id: parseInt(depot_id) });
+      } else if (!reception.depot) {
+        reception.depot = await findMagazinDepot(tm);
       }
 
       // 4) Recreate new BonReceptionArticle rows and apply NEW stock effect
@@ -274,8 +355,8 @@ exports.updateBonReception = async (req, res) => {
             item.remise !== undefined ? parseFloat(item.remise) : null;
 
           // increase stock for reception
-          if (depot_id) {
-            await updateDepotStock(tm, art.id, parseInt(depot_id), qty);
+          if (reception.depot) {
+            await updateDepotStock(tm, art.id, reception.depot.id, qty);
           } else {
             art.qte = (art.qte || 0) + qty;
             art.qte_physique = (art.qte_physique || 0) + qty;
@@ -287,6 +368,7 @@ exports.updateBonReception = async (req, res) => {
             article: art,
             quantite: qty,
             prixUnitaire,
+            prix_ttc: parseOptionalNumber(item.prix_ttc),
             tva: tvaRate,
             remise: remiseArticle,
           });

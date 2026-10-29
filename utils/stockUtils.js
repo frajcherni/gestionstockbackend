@@ -1,5 +1,6 @@
 const { StockDepot } = require("../entities/StockDepot");
 const { Article } = require("../entities/Article");
+const { Depot } = require("../entities/Depot");
 const { JournalSortieArticle } = require("../entities/JournalSortieArticle");
 
 /**
@@ -107,4 +108,17 @@ async function updateDepotStock(
   return stockDepot;
 }
 
-module.exports = { updateDepotStock, recordJournalSortie };
+/**
+ * Dépôt par défaut des réceptions : celui dont le nom contient magazin/magasin
+ * (même règle que qte_magazin des articles). null s'il n'existe pas.
+ */
+async function findMagazinDepot(entityManager) {
+  return entityManager
+    .getRepository(Depot)
+    .createQueryBuilder("depot")
+    .where("(LOWER(depot.nom) LIKE '%magaz%' OR LOWER(depot.nom) LIKE '%magasin%')")
+    .orderBy("depot.id", "ASC")
+    .getOne();
+}
+
+module.exports = { updateDepotStock, recordJournalSortie, findMagazinDepot };

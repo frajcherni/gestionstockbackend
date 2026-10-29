@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.post('/addcommande', controller.createBonCommande);
 router.get('/getcommande', controller.getAllBonCommande);
+router.get('/paginated', controller.getBonCommandePaginated);
 router.get('/getNextCommandeNumber', controller.getNextCommandeNumber);
 
 //router.put('/deleteboncommande/:id', controller.annulerBonCommande);

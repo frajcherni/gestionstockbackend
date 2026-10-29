@@ -6,6 +6,7 @@ const router = express.Router();
 
 router.post('/addbonreception', bonReceptionController.createBonReception);
 router.get('/getbonreception', bonReceptionController.getAllBonReception);
+router.get('/paginated', bonReceptionController.getBonReceptionPaginated);
 router.get('/bonreception/:id', bonReceptionController.getBonReceptionById);
 
 router.put('/updateBonReception/:id', bonReceptionController.updateBonReception);

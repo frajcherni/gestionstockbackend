@@ -1,7 +1,21 @@
 const { AppDataSource } = require("../db");
 const { Article } = require("../entities/Article");
 const { Fournisseur } = require("../entities/Fournisseur");
-const { BonCommande } = require("../entities/BonCommande");
+const { BonCommande, BonCommandeArticle } = require("../entities/BonCommande");
+
+// Optional numeric field from the form ("" / null / undefined → null)
+const parseOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const num = parseFloat(value);
+  return isNaN(num) ? null : num;
+};
+
+// Totals are computed by the frontend with the same engine as the ventes pages;
+// fall back to the backend computation only when they are not sent.
+const pickTotal = (sent, computed) => {
+  const value = parseOptionalNumber(sent);
+  return Math.round((value !== null ? value : computed) * 1000) / 1000;
+};
 
 exports.createBonCommande = async (req, res) => {
   try {
@@ -61,7 +75,9 @@ exports.createBonCommande = async (req, res) => {
       }
 
       let prixUnitaire = parseFloat(item.prix_unitaire);
-      const tvaRate = item.tva ? parseFloat(item.tva) : article.tva || 0;
+      // 0% chosen on the line must stay 0, not fall back to the article TVA
+      const lineTva = parseOptionalNumber(item.tva);
+      const tvaRate = lineTva !== null ? lineTva : article.tva || 0;
       const remiseRate = item.remise ? parseFloat(item.remise) : 0;
       const tauxFodec =
         item.taux_fodec !== undefined
@@ -93,6 +109,7 @@ exports.createBonCommande = async (req, res) => {
         article,
         quantite,
         prixUnitaire,
+        prix_ttc: parseOptionalNumber(item.prix_ttc),
         tva: tvaRate,
         remise: remiseRate,
         taux_fodec: tauxFodec,
@@ -115,9 +132,9 @@ exports.createBonCommande = async (req, res) => {
       status: "Confirme",
       remise: finalRemise,
       remiseType,
-      totalHT: subTotal.toFixed(2),
-      totalTVA: totalTax.toFixed(2),
-      totalTTC: finalTotal.toFixed(2),
+      totalHT: pickTotal(req.body.totalHT, subTotal),
+      totalTVA: pickTotal(req.body.totalTVA, totalTax),
+      totalTTC: pickTotal(req.body.totalTTC, finalTotal),
       notes: notes || null,
       fournisseur,
       taxMode,
@@ -155,7 +172,7 @@ exports.updateBonCommande = async (req, res) => {
     const bonRepo = AppDataSource.getRepository(BonCommande);
     const fournisseurRepo = AppDataSource.getRepository(Fournisseur);
     const articleRepo = AppDataSource.getRepository(Article);
-    const bonArticleRepo = AppDataSource.getRepository(BonCommande);
+    const bonArticleRepo = AppDataSource.getRepository(BonCommandeArticle);
 
     // Get bon de commande + articles
     const bonCommande = await bonRepo.findOne({
@@ -198,17 +215,8 @@ exports.updateBonCommande = async (req, res) => {
       await articleRepo.save(article);
     }
 
-    // --- 🧹 Delete removed articles (not in the updated list) ---
-    const newArticleIds = articles.map((a) => parseInt(a.article_id));
-    const oldArticlesToDelete = bonCommande.articles.filter(
-      (ba) => !newArticleIds.includes(ba.article.id)
-    );
-
-    if (oldArticlesToDelete.length > 0) {
-      for (const oldItem of oldArticlesToDelete) {
-        await bonArticleRepo.delete({ id: oldItem.id });
-      }
-    }
+    // --- 🧹 Delete the old lines: the new list below is re-inserted in full ---
+    await bonArticleRepo.delete({ bonCommande: { id: bonCommande.id } });
 
     // --- Recalculate totals ---
     let calculatedFodec = 0;
@@ -234,7 +242,7 @@ exports.updateBonCommande = async (req, res) => {
       }
 
       let prixUnitaire = parseFloat(item.prix_unitaire);
-      const tvaRate = item.tva ? parseFloat(item.tva) : 0;
+      const tvaRate = parseOptionalNumber(item.tva) || 0;
       const remiseRate = item.remise ? parseFloat(item.remise) : 0;
       const tauxFodec =
         item.taux_fodec !== undefined
@@ -264,6 +272,7 @@ exports.updateBonCommande = async (req, res) => {
         article,
         quantite,
         prixUnitaire,
+        prix_ttc: parseOptionalNumber(item.prix_ttc),
         tva: tvaRate,
         remise: remiseRate,
         taux_fodec: tauxFodec,
@@ -287,9 +296,9 @@ exports.updateBonCommande = async (req, res) => {
     bonCommande.status = status;
     bonCommande.remise = finalRemise;
     bonCommande.remiseType = remiseType;
-    bonCommande.totalHT = subTotal.toFixed(2);
-    bonCommande.totalTVA = totalTax.toFixed(2);
-    bonCommande.totalTTC = finalTotal.toFixed(2);
+    bonCommande.totalHT = pickTotal(req.body.totalHT, subTotal);
+    bonCommande.totalTVA = pickTotal(req.body.totalTVA, totalTax);
+    bonCommande.totalTTC = pickTotal(req.body.totalTTC, finalTotal);
     bonCommande.notes = notes || null;
     bonCommande.fournisseur = fournisseur;
     bonCommande.taxMode = taxMode;
@@ -316,6 +325,76 @@ exports.getAllBonCommande = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Erreur serveur", error: err.message });
+  }
+};
+
+// Same two-step pagination as the ventes lists: paginate the ids with the
+// filters, then load the full bons (articles, fournisseur) for that page only.
+exports.getBonCommandePaginated = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = "", status = "", startDate, endDate } = req.query;
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, parseInt(limit) || 10);
+    const repo = AppDataSource.getRepository(BonCommande);
+
+    const idQb = repo
+      .createQueryBuilder("bc")
+      .leftJoin("bc.fournisseur", "fournisseur")
+      .select(["bc.id", "bc.dateCommande"]);
+
+    if (search) {
+      idQb.andWhere(
+        "(bc.numeroCommande ILIKE :search OR fournisseur.raison_sociale ILIKE :search)",
+        { search: `%${search}%` }
+      );
+    }
+    if (status) {
+      idQb.andWhere("bc.status = :status", { status });
+    }
+    if (startDate) {
+      idQb.andWhere("bc.dateCommande >= :startDate", { startDate });
+    }
+    if (endDate) {
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+      idQb.andWhere("bc.dateCommande <= :endDate", { endDate: end });
+    }
+
+    const totalCount = await idQb.getCount();
+    const idResults = await idQb
+      .orderBy("bc.dateCommande", "DESC")
+      .addOrderBy("bc.id", "DESC")
+      .skip((pageNum - 1) * limitNum)
+      .take(limitNum)
+      .getMany();
+
+    const ids = idResults.map((b) => b.id);
+    const pagination = {
+      totalCount,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(totalCount / limitNum),
+    };
+
+    if (ids.length === 0) {
+      return res.json({ bons: [], pagination });
+    }
+
+    const bons = await repo
+      .createQueryBuilder("bc")
+      .leftJoinAndSelect("bc.fournisseur", "fournisseur")
+      .leftJoinAndSelect("bc.articles", "articles")
+      .leftJoinAndSelect("articles.article", "article")
+      .where("bc.id IN (:...ids)", { ids })
+      .orderBy("bc.dateCommande", "DESC")
+      .addOrderBy("bc.id", "DESC")
+      .addOrderBy("articles.id", "ASC")
+      .getMany();
+
+    res.json({ bons, pagination });
+  } catch (err) {
+    console.error("Pagination error:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la pagination", error: err.message });
   }
 };
 
