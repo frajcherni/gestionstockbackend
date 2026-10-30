@@ -69,7 +69,7 @@ function calculatePaymentTotals(facture, encaissementsMap) {
     facturePayments + bcPayments + vcPayments + blPayments + blPaiements;
 
   // Calculate article totals
-  let subTotal = 0, totalTax = 0, grandTotal = 0;
+  let subTotal = 0, totalTax = 0, grandTotal = 0, exactHT = 0;
   if (facture.articles && Array.isArray(facture.articles)) {
     facture.articles.forEach((item) => {
       const qty = Number(item.quantite) || 1;
@@ -85,6 +85,7 @@ function calculatePaymentTotals(facture, encaissementsMap) {
       subTotal += montantHTLigne;
       totalTax += taxAmount;
       grandTotal += montantTTCLigne;
+      exactHT += qty * priceHT * (1 - remiseRate / 100);
     });
   }
 
@@ -98,13 +99,14 @@ function calculatePaymentTotals(facture, encaissementsMap) {
       finalTotal = Number(facture.remise);
     }
   }
+  // Exonerated: no TVA is charged, the client pays the HT with the same remise — what the
+  // invoice PDF asks for — not the TTC
+  if (facture.exoneration) {
+    finalTotal = grandTotal > 0 ? exactHT * (finalTotal / grandTotal) : exactHT;
+  }
   if (facture.timbreFiscal) {
-    if (hasDiscount) {
-      finalTotal += 1;
-    } else {
-      grandTotal += 1;
-      finalTotal = grandTotal;
-    }
+    if (!hasDiscount) grandTotal += 1;
+    finalTotal += 1;
   }
 
   subTotal = Math.round(subTotal * 1000) / 1000;

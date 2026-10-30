@@ -26,6 +26,7 @@ exports.createBonLivraison = async (req, res) => {
       dateLivraison,
       remise,
       remiseType,
+      lockedPercentage,
       notes,
       client_id,
       vendeur_id,
@@ -369,6 +370,9 @@ exports.createBonLivraison = async (req, res) => {
       status: "Livré",
       remise: remise || 0,
       remiseType: remiseType || "percentage",
+      // The commande's remise as a percentage: a partial delivery gets its share of the
+      // remise, not the commande's whole TTC target
+      lockedPercentage: lockedPercentage ?? null,
       notes: notes || null,
       client,
       vendeur,
@@ -457,6 +461,7 @@ exports.updateBonLivraison = async (req, res) => {
       dateLivraison,
       remise,
       remiseType,
+      lockedPercentage,
       notes,
       taxMode,
       articles,
@@ -550,6 +555,7 @@ exports.updateBonLivraison = async (req, res) => {
     bon.dateLivraison = dateLivraison ? new Date(dateLivraison) : bon.dateLivraison;
     bon.remise = remise !== undefined ? remise : bon.remise;
     bon.remiseType = remiseType || bon.remiseType;
+    if (lockedPercentage !== undefined) bon.lockedPercentage = lockedPercentage;
     bon.notes = notes || bon.notes;
     bon.taxMode = taxMode || bon.taxMode;
     if (newClient) bon.client = newClient;
